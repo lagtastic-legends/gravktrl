@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">GravKtrl</string>
+    <string name="title_activity_main">GravKtrl</string>
+    <string name="package_name">com.gravktrl.app</string>
+    <string name="custom_url_scheme">com.gravktrl.app</string>
+</resources>

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportHeight="108"
+    android:viewportWidth="108">
+
+    <!-- Outer Hexagon Border -->
+    <path
+        android:strokeWidth="2.5"
+        android:strokeLineJoin="round"
+        android:strokeColor="#06B6D4"
+        android:fillColor="#111827"
+        android:pathData="M 54,20 L 84,37 L 84,71 L 54,88 L 24,71 L 24,37 Z" />
+
+    <!-- Tilted Orbital Ring -->
+    <path
+        android:strokeWidth="2.0"
+        android:strokeColor="#DB2777"
+        android:fillColor="#00000000"
+        android:pathData="M 28,62 C 34,44 74,44 80,62 C 74,74 34,74 28,62 Z" />
+
+    <!-- Terminal Brackets { } -->
+    <!-- Left { -->
+    <path
+        android:strokeWidth="2.0"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeColor="#06B6D4"
+        android:fillColor="#00000000"
+        android:pathData="M 38,44 C 34,44 34,50 34,54 C 34,57 31,57 31,57 C 31,57 34,57 34,60 C 34,64 38,64 38,64" />
+
+    <!-- Right } -->
+    <path
+        android:strokeWidth="2.0"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeColor="#06B6D4"
+        android:fillColor="#00000000"
+        android:pathData="M 70,44 C 74,44 74,50 74,54 C 74,57 77,57 77,57 C 77,57 74,57 74,60 C 74,64 70,64 70,64" />
+
+    <!-- Center Levitating Upward Arrow Core -->
+    <path
+        android:fillColor="#38BDF8"
+        android:strokeColor="#9333EA"
+        android:strokeWidth="1.0"
+        android:pathData="M 54,32 L 66,50 L 59,50 L 59,66 L 49,66 L 49,50 L 42,50 Z" />
+
+    <!-- Accent Particle Dot -->
+    <path
+        android:fillColor="#EC4899"
+        android:pathData="M 54,28 A 2,2 0 1,1 54,32 A 2,2 0 1,1 54,28" />
+</vector>
