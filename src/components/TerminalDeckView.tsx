@@ -14,7 +14,7 @@ const TERMINAL_MACROS = [
   { label: "test", cmd: "npm test" },
   { label: "git status", cmd: "git status" },
   { label: "adb devices", cmd: "adb devices" },
-  { label: "gradlew release", cmd: "cd android && gradlew assembleRelease" },
+  { label: "gradlew debug", cmd: "cd android && gradlew assembleDebug" },
 ];
 
 export const TerminalDeckView: React.FC<TerminalDeckViewProps> = ({ client, activeWorkspace }) => {
@@ -22,7 +22,7 @@ export const TerminalDeckView: React.FC<TerminalDeckViewProps> = ({ client, acti
   const [lines, setLines] = useState<Array<{ id: string; text: string; stream: "stdout" | "stderr" | "system" }>>([
     {
       id: "init",
-      text: "[GravKtrl Terminal Deck] Connected to native PowerShell engine.\nCommands will execute in: " + activeWorkspace,
+      text: "[GravKtrl Terminal Deck] Connected to native PC terminal engine.\nWorking directory: " + activeWorkspace,
       stream: "system",
     },
   ]);
@@ -106,72 +106,40 @@ export const TerminalDeckView: React.FC<TerminalDeckViewProps> = ({ client, acti
         ...prev,
         {
           id: Math.random().toString(),
-          text: `[Error executing command]: ${err.message || String(err)}`,
+          text: `\n[Execution Error]: ${err.message || String(err)}\n`,
           stream: "stderr",
         },
       ]);
-      setActiveExecutionId(null);
     }
   };
 
   const handleApprove = async () => {
     if (!pendingApproval) return;
-    const { approvalId, command: approvedCmd } = pendingApproval;
-    setPendingApproval(null);
-
-    setLines((prev) => [
-      ...prev,
-      {
-        id: Math.random().toString(),
-        text: `[Destructive Guard]: Execution APPROVED by mobile operator for "${approvedCmd}"`,
-        stream: "system",
-      },
-    ]);
-
     try {
-      const res = await client.approveCommand(approvalId);
+      const res = await client.approveCommand(pendingApproval.approvalId);
       setActiveExecutionId(res.executionId);
+      setPendingApproval(null);
     } catch (err: any) {
-      setLines((prev) => [
-        ...prev,
-        {
-          id: Math.random().toString(),
-          text: `[Approval Failed]: ${err.message || String(err)}`,
-          stream: "stderr",
-        },
-      ]);
+      alert("Approval error: " + err.message);
     }
   };
 
-  const handleRejectApproval = () => {
-    if (!pendingApproval) return;
+  const handleDeny = () => {
+    setPendingApproval(null);
     setLines((prev) => [
       ...prev,
       {
         id: Math.random().toString(),
-        text: `[Destructive Guard]: Execution REJECTED by mobile operator for "${pendingApproval.command}"`,
+        text: `\n[Security Alert]: Command execution denied by mobile operator.\n`,
         stream: "stderr",
       },
     ]);
-    setPendingApproval(null);
   };
 
   const handleKill = async () => {
     if (!activeExecutionId) return;
-    try {
-      await client.killTerminal(activeExecutionId);
-      setActiveExecutionId(null);
-      setLines((prev) => [
-        ...prev,
-        {
-          id: Math.random().toString(),
-          text: `\n[Process killed by user]\n`,
-          stream: "system",
-        },
-      ]);
-    } catch (e: any) {
-      console.error("Kill failed:", e);
-    }
+    await client.killTerminal(activeExecutionId);
+    setActiveExecutionId(null);
   };
 
   const clearTerminal = () => {
@@ -180,87 +148,111 @@ export const TerminalDeckView: React.FC<TerminalDeckViewProps> = ({ client, acti
 
   const navigateHistory = (direction: "up" | "down") => {
     if (history.length === 0) return;
-    let newIdx = direction === "up" ? historyIdx + 1 : historyIdx - 1;
-    if (newIdx < 0) {
-      setHistoryIdx(-1);
-      setCommand("");
-      return;
+    if (direction === "up") {
+      const nextIdx = Math.min(historyIdx + 1, history.length - 1);
+      setHistoryIdx(nextIdx);
+      setCommand(history[nextIdx] || "");
+    } else {
+      const nextIdx = Math.max(historyIdx - 1, -1);
+      setHistoryIdx(nextIdx);
+      setCommand(nextIdx === -1 ? "" : history[nextIdx] || "");
     }
-    if (newIdx >= history.length) newIdx = history.length - 1;
-    setHistoryIdx(newIdx);
-    setCommand(history[newIdx]);
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#08090d] text-slate-100 select-text relative">
-      {/* Terminal Header & Status Strip */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d1117] border-b border-[#21262d] text-xs">
-        <div className="flex items-center gap-1.5 overflow-hidden">
-          <Terminal className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-          <span className="font-semibold text-emerald-400">PowerShell Engine</span>
-          <span className="text-slate-500">•</span>
-          <span className="text-slate-400 truncate max-w-[170px]" title={activeWorkspace}>
-            {activeWorkspace.split(/[\\/]/).pop() || "Workspace"}
-          </span>
+    <div className="flex flex-col h-full bg-[#f6f8fb] text-slate-800 select-text">
+      {/* 1. Header Strip */}
+      <div className="mx-3 mt-3 p-3 rounded-2xl bg-white shadow-neo-flat border border-white/60 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2 overflow-hidden">
+          <div className="w-8 h-8 rounded-xl bg-indigo-50 shadow-neo-soft flex items-center justify-center text-indigo-600 shrink-0">
+            <Terminal className="w-4 h-4" />
+          </div>
+          <div className="flex flex-col min-w-0">
+            <span className="font-bold text-xs text-slate-800">Native Terminal Engine</span>
+            <span className="text-[10px] font-mono text-slate-400 truncate max-w-[160px]" title={activeWorkspace}>
+              {activeWorkspace}
+            </span>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
           {activeExecutionId ? (
-            <div className="flex items-center gap-1.5">
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-950/70 border border-emerald-800/60 text-emerald-300 text-[10px]">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                RUNNING
-              </span>
-              <button
-                onClick={handleKill}
-                className="p-1 px-2 rounded bg-rose-950/80 border border-rose-800 text-rose-300 hover:bg-rose-900 text-[10px] flex items-center gap-1"
-              >
-                <Square className="w-2.5 h-2.5 fill-current" />
-                KILL
-              </button>
-            </div>
+            <button
+              onClick={handleKill}
+              className="px-2.5 py-1 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 shadow-neo-soft text-[10px] font-bold flex items-center gap-1 active:shadow-neo-pressed"
+            >
+              <Square className="w-2.5 h-2.5 fill-current text-rose-600" />
+              KILL
+            </button>
           ) : (
-            <span className="px-2 py-0.5 rounded-full bg-slate-900 border border-slate-800 text-slate-400 text-[10px]">
+            <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
               READY
             </span>
           )}
 
           <button
             onClick={clearTerminal}
-            className="p-1 text-slate-400 hover:text-slate-200 transition-colors"
-            title="Clear output"
+            className="p-1.5 rounded-xl bg-white shadow-neo-soft border border-white/80 text-slate-500 hover:text-slate-800 active:shadow-neo-pressed"
+            title="Clear buffer"
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
-      {/* 1-Tap Terminal Macros */}
-      <div className="flex items-center gap-1.5 px-3 py-1.5 overflow-x-auto no-scrollbar bg-[#090b10] border-b border-[#1b212c]">
+      {/* 2. Destructive Safety Guard Approval Modal */}
+      {pendingApproval && (
+        <div className="mx-3 mt-2 p-3.5 rounded-2xl bg-rose-50 border border-rose-200 shadow-neo-flat text-rose-950 shrink-0">
+          <div className="flex items-center gap-2 mb-1.5">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span className="text-xs font-bold uppercase tracking-wide text-rose-800">Destructive Safety Guard</span>
+          </div>
+          <p className="text-xs text-rose-900 mb-1.5">{pendingApproval.riskReason}</p>
+          <div className="p-2 neo-well rounded-xl font-mono text-[11px] text-slate-800 mb-3 break-all">
+            {pendingApproval.command}
+          </div>
+          <div className="flex items-center gap-2 justify-end">
+            <button
+              onClick={handleDeny}
+              className="px-3 py-1.5 rounded-xl bg-white shadow-neo-soft text-slate-700 font-bold text-xs hover:bg-slate-50 active:shadow-neo-pressed"
+            >
+              Deny
+            </button>
+            <button
+              onClick={handleApprove}
+              className="px-3 py-1.5 rounded-xl bg-rose-600 text-white font-bold text-xs shadow-neo-soft hover:bg-rose-700 flex items-center gap-1 active:scale-95"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              Authorize &amp; Execute
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Terminal Quick Command Macros */}
+      <div className="flex items-center gap-1.5 px-3 py-2 overflow-x-auto no-scrollbar shrink-0">
         {TERMINAL_MACROS.map((m, idx) => (
           <button
             key={idx}
             onClick={() => handleExecute(m.cmd)}
-            disabled={activeExecutionId !== null}
-            className="whitespace-nowrap px-2.5 py-1 text-[11px] rounded bg-[#161b22] hover:bg-[#21262d] text-emerald-400 font-mono border border-[#30363d] transition-colors disabled:opacity-50 shrink-0 active:scale-95 flex items-center gap-1"
+            className="whitespace-nowrap px-3 py-1.5 text-[11px] font-semibold rounded-full bg-white shadow-neo-soft hover:shadow-neo-pressed active:shadow-neo-pressed text-slate-700 border border-white/80 transition-all shrink-0"
           >
-            <Play className="w-2.5 h-2.5 fill-current" />
             {m.label}
           </button>
         ))}
       </div>
 
-      {/* Terminal View Output */}
-      <div className="flex-1 overflow-y-auto p-3 font-mono text-[11px] leading-relaxed bg-[#050608] space-y-0.5 select-text">
+      {/* 4. Terminal Output Viewport (Dark Inset Window for Perfect Readability) */}
+      <div className="flex-1 mx-3 mb-2 p-3.5 rounded-2xl bg-[#0f172a] shadow-neo-pressed border border-slate-700/40 text-slate-100 font-mono text-xs overflow-y-auto leading-relaxed select-text">
         {lines.map((l) => (
           <div
             key={l.id}
-            className={`whitespace-pre-wrap break-all ${
+            className={`whitespace-pre-wrap ${
               l.stream === "stderr"
-                ? "text-rose-400 font-medium"
+                ? "text-rose-400 font-bold"
                 : l.stream === "system"
-                ? "text-cyan-400 font-semibold"
-                : "text-slate-300"
+                ? "text-cyan-400"
+                : "text-slate-200"
             }`}
           >
             {l.text}
@@ -269,82 +261,54 @@ export const TerminalDeckView: React.FC<TerminalDeckViewProps> = ({ client, acti
         <div ref={terminalEndRef} />
       </div>
 
-      {/* High-Risk Destructive Approval Modal Card */}
-      {pendingApproval && (
-        <div className="absolute inset-x-3 bottom-16 z-30 p-3.5 bg-rose-950/95 border-2 border-rose-500 rounded-2xl shadow-2xl backdrop-blur-md animate-in fade-in slide-in-from-bottom duration-200">
-          <div className="flex items-start gap-2.5 mb-2">
-            <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-            <div>
-              <h4 className="text-xs font-bold text-rose-200 uppercase tracking-wider">
-                Security Approval Required
-              </h4>
-              <p className="text-[11px] text-rose-300 mt-0.5">
-                {pendingApproval.riskReason}
-              </p>
-            </div>
-          </div>
-
-          <div className="p-2 rounded bg-black/60 font-mono text-xs text-rose-200 border border-rose-800/60 break-all mb-3">
-            {pendingApproval.command}
-          </div>
-
-          <div className="flex items-center gap-2">
+      {/* 5. Terminal Command Input Bar */}
+      <div className="shrink-0 p-3 bg-[#f6f8fb]/95 backdrop-blur-xl border-t border-slate-200/60">
+        <div className="flex items-center gap-2">
+          {/* History Nav */}
+          <div className="flex flex-col gap-1 shrink-0">
             <button
-              onClick={handleApprove}
-              className="flex-1 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs flex items-center justify-center gap-1.5 shadow active:scale-95"
+              type="button"
+              onClick={() => navigateHistory("up")}
+              className="w-7 h-4 rounded-md bg-white shadow-neo-soft flex items-center justify-center text-slate-600 active:shadow-neo-pressed"
+              title="Previous Command"
             >
-              <ShieldCheck className="w-4 h-4" />
-              Approve Execution
+              <ArrowUp className="w-2.5 h-2.5" />
             </button>
             <button
-              onClick={handleRejectApproval}
-              className="py-2 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs active:scale-95"
+              type="button"
+              onClick={() => navigateHistory("down")}
+              className="w-7 h-4 rounded-md bg-white shadow-neo-soft flex items-center justify-center text-slate-600 active:shadow-neo-pressed"
+              title="Next Command"
             >
-              Cancel
+              <ArrowDown className="w-2.5 h-2.5" />
             </button>
           </div>
-        </div>
-      )}
 
-      {/* Terminal Command Input */}
-      <div className="shrink-0 px-3 py-2 bg-[#0d1117] border-t border-[#21262d] z-10">
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => navigateHistory("up")}
-            className="w-9 h-9 rounded-lg bg-[#161b22] border border-[#30363d] text-slate-400 hover:text-white flex items-center justify-center shrink-0 active:scale-95"
-            title="Previous command"
-          >
-            <ArrowUp className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => navigateHistory("down")}
-            className="w-9 h-9 rounded-lg bg-[#161b22] border border-[#30363d] text-slate-400 hover:text-white flex items-center justify-center shrink-0 active:scale-95"
-            title="Next command"
-          >
-            <ArrowDown className="w-3.5 h-3.5" />
-          </button>
+          {/* Command Input Well */}
+          <div className="flex-1 relative">
+            <input
+              type="text"
+              value={command}
+              onChange={(e) => setCommand(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleExecute();
+                else if (e.key === "ArrowUp") navigateHistory("up");
+                else if (e.key === "ArrowDown") navigateHistory("down");
+              }}
+              placeholder="Enter shell command (npm, git, adb, gradlew)..."
+              className="w-full neo-well rounded-2xl px-3.5 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none font-mono"
+            />
+          </div>
 
-          <input
-            type="text"
-            value={command}
-            onChange={(e) => setCommand(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                handleExecute();
-              }
-            }}
-            placeholder="powershell command..."
-            className="flex-1 min-w-0 h-9 bg-[#161b22] border border-[#30363d] focus:border-emerald-500 rounded-xl px-3 text-xs font-mono text-white placeholder-slate-500 focus:outline-none"
-          />
-
+          {/* Run Button */}
           <button
             type="button"
             onClick={() => handleExecute()}
-            disabled={!command.trim() || activeExecutionId !== null}
-            className="w-9 h-9 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white flex items-center justify-center shrink-0 font-medium shadow transition-all active:scale-95"
-            title="Execute"
+            disabled={!command.trim()}
+            className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-500 shadow-neo-soft text-white flex items-center justify-center shrink-0 font-medium disabled:opacity-40 hover:brightness-105 active:scale-95 transition-all"
+            title="Execute Command"
           >
-            <Play className="w-3.5 h-3.5 fill-current" />
+            <Play className="w-4 h-4 fill-current" />
           </button>
         </div>
       </div>

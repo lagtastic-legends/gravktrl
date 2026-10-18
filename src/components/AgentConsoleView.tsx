@@ -1,7 +1,16 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { Mic, MicOff, Send, Square, Sparkles, Terminal, ShieldAlert, CheckCircle2, Copy, RefreshCw, Activity, FileText } from "lucide-react";
+import {
+  Mic,
+  MicOff,
+  Send,
+  Square,
+  Sparkles,
+  CheckCircle2,
+  Copy,
+  Activity,
+} from "lucide-react";
 import type { GravKtrlClient } from "../lib/gravktrl-client";
 
 interface AgentConsoleViewProps {
@@ -42,7 +51,7 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
     {
       id: "initial",
       sender: "agent",
-      text: "⚡ **GravKtrl Dual-Mode Agent Bridge Connected.**\n\nDirectly inject prompts into Gemini 3.8 Flash inside Google Antigravity on your PC (both normal Antigravity.exe Win32 and CDP port 9222 supported). Live thoughts and file edits will stream here in real time.",
+      text: "⚡ **GravKtrl Dual-Mode Agent Bridge Connected.**\n\nDirectly inject prompts into Gemini 3.8 Flash inside Google Antigravity on your PC (both normal Antigravity.exe Win32 and CDP port 9222 supported). Live thoughts and file edits stream here in real time.",
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     },
   ]);
@@ -207,81 +216,98 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#08090d] text-slate-100 select-text">
-      {/* Active Workspace / Agent Status Strip */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d1117] border-b border-[#21262d] text-xs">
-        <div className="flex items-center gap-1.5 overflow-hidden">
-          <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-          <span className="font-semibold text-cyan-400">Gemini 3.8 Flash</span>
-          <span className="text-slate-500">•</span>
-          <span className="text-slate-400 truncate max-w-[130px]" title={activeWorkspace}>
-            {activeWorkspace.split(/[\\/]/).pop() || "Workspace"}
-          </span>
+    <div className="flex flex-col h-full bg-[#f6f8fb] text-slate-800 select-text">
+      {/* 1. Neomorphic Status Strip Card */}
+      <div className="mx-3 mt-3 p-3 rounded-2xl bg-white shadow-neo-flat border border-white/60 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2 overflow-hidden">
+          <div className="w-8 h-8 rounded-xl bg-indigo-50 shadow-neo-soft flex items-center justify-center text-indigo-600 shrink-0">
+            <Sparkles className="w-4 h-4 text-indigo-600" />
+          </div>
+          <div className="flex flex-col min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="font-bold text-xs text-slate-800">Gemini 3.8 Flash</span>
+              <span className="text-slate-300">•</span>
+              <span className="text-[11px] font-mono text-indigo-600 font-semibold truncate max-w-[120px]">
+                {activeWorkspace.split(/[\\/]/).pop() || "Workspace"}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              {attachMode === "cdp" ? (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9px] font-bold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  CDP:9222 ACTIVE
+                </span>
+              ) : attachMode === "win32" ? (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-[9px] font-bold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                  WIN32 PROCESS
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[9px] font-bold">
+                  STAGED ON PC
+                </span>
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="flex items-center gap-1.5">
-          {/* Exact attach mode badge */}
-          {attachMode === "cdp" ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-cyan-950/70 border border-cyan-800/60 text-cyan-300 text-[10px]" title="Chrome DevTools Protocol Port 9222 Active">
-              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-              CDP 9222
-            </span>
-          ) : attachMode === "win32" ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-950/70 border border-purple-800/60 text-purple-300 text-[10px]" title="Normal Windows Antigravity.exe Window Attached">
-              <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
-              WIN32
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-950/70 border border-amber-800/60 text-amber-300 text-[10px]">
-              STAGED
-            </span>
-          )}
-
-          {/* Activity Drawer Toggle */}
+          {/* File activity toggle */}
           <button
             onClick={() => setShowActivity(!showActivity)}
-            className={`p-1 px-2 rounded text-[10px] flex items-center gap-1 border transition-colors ${
+            className={`h-8 px-2.5 rounded-xl text-[11px] font-semibold flex items-center gap-1 transition-all border ${
               showActivity
-                ? "bg-cyan-900/80 border-cyan-600 text-cyan-200"
-                : "bg-[#161b22] border-[#30363d] text-slate-300 hover:text-white"
+                ? "bg-indigo-50 border-indigo-200 text-indigo-700 shadow-neo-pressed"
+                : "bg-white shadow-neo-soft border-white/80 text-slate-700 hover:text-indigo-600 active:shadow-neo-pressed"
             }`}
             title="Toggle live workspace file activity feed"
           >
-            <Activity className="w-3 h-3 text-cyan-400" />
+            <Activity className="w-3.5 h-3.5 text-indigo-600" />
             <span>Files ({recentFiles.length})</span>
           </button>
 
           {agentStatus === "generating" && (
             <button
               onClick={handleStop}
-              className="p-1 px-2 rounded bg-rose-950/80 border border-rose-800 text-rose-300 hover:bg-rose-900 text-[10px] flex items-center gap-1"
+              className="h-8 px-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 shadow-neo-soft text-[11px] font-bold flex items-center gap-1 active:shadow-neo-pressed"
             >
-              <Square className="w-2.5 h-2.5 fill-current" />
+              <Square className="w-3 h-3 fill-current text-rose-600" />
               STOP
             </button>
           )}
         </div>
       </div>
 
-      {/* Collapsible Live File Activity Stream */}
+      {/* 2. Collapsible Live Workspace File Feed Card */}
       {showActivity && (
-        <div className="shrink-0 max-h-48 overflow-y-auto bg-[#070a12] border-b border-[#1b212c] p-2 space-y-1">
-          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1 mb-1 flex items-center justify-between">
-            <span>Live Workspace File Feed</span>
-            <span className="text-cyan-400 font-mono text-[10px]">{activeWorkspace.split(/[\\/]/).pop()}</span>
+        <div className="mx-3 mt-2 p-3 rounded-2xl bg-white shadow-neo-flat border border-white/60 shrink-0 max-h-48 overflow-y-auto space-y-1.5 animate-in fade-in">
+          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1 flex items-center justify-between">
+            <span>Live Workspace File Activity</span>
+            <span className="font-mono text-indigo-600 font-semibold">{activeWorkspace.split(/[\\/]/).pop()}</span>
           </div>
           {recentFiles.length === 0 ? (
-            <div className="text-[11px] text-slate-500 py-3 text-center">No file modifications detected yet</div>
+            <div className="text-[11px] text-slate-400 py-3 text-center">No file modifications detected yet</div>
           ) : (
             recentFiles.map((f, i) => (
-              <div key={i} className="flex items-center justify-between px-2 py-1 rounded bg-[#0e131f] border border-[#1e2738] text-[11px]">
-                <span className="font-mono text-slate-200 truncate max-w-[70%]">
-                  <span className={f.action === "created" ? "text-emerald-400 font-bold" : f.action === "deleted" ? "text-rose-400 font-bold" : "text-cyan-400 font-bold"}>
+              <div
+                key={i}
+                className="flex items-center justify-between p-2 rounded-xl neo-well text-[11px]"
+              >
+                <span className="font-mono text-slate-800 truncate max-w-[70%]">
+                  <span
+                    className={
+                      f.action === "created"
+                        ? "text-emerald-600 font-bold"
+                        : f.action === "deleted"
+                        ? "text-rose-600 font-bold"
+                        : "text-indigo-600 font-bold"
+                    }
+                  >
                     [{f.action.toUpperCase()}]
                   </span>{" "}
                   {f.file}
                 </span>
-                <span className="text-[10px] text-slate-500 font-mono">
+                <span className="text-[10px] text-slate-400 font-mono">
                   {new Date(f.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                 </span>
               </div>
@@ -290,55 +316,55 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
         </div>
       )}
 
-      {/* Preset Macro Pills */}
-      <div className="flex items-center gap-1.5 px-3 py-2 overflow-x-auto no-scrollbar bg-[#090b10] border-b border-[#1b212c]">
+      {/* 3. Preset Macro Pills */}
+      <div className="flex items-center gap-1.5 px-3 py-2 overflow-x-auto no-scrollbar shrink-0">
         {PRESET_PROMPTS.map((p, idx) => (
           <button
             key={idx}
             onClick={() => handleSend(p.prompt)}
             disabled={isSending || agentStatus === "generating"}
-            className="whitespace-nowrap px-2.5 py-1 text-[11px] rounded bg-[#161b22] hover:bg-[#21262d] text-slate-300 border border-[#30363d] transition-colors disabled:opacity-50 shrink-0 active:scale-95"
+            className="whitespace-nowrap px-3 py-1.5 text-[11px] font-semibold rounded-full bg-white shadow-neo-soft hover:shadow-neo-pressed active:shadow-neo-pressed text-slate-700 border border-white/80 transition-all disabled:opacity-50 shrink-0"
           >
             {p.label}
           </button>
         ))}
       </div>
 
-      {/* Message Feed / Streaming Window */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-3">
+      {/* 4. Message Stream Feed */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-3">
         {messages.map((m) => (
           <div
             key={m.id}
             className={`flex flex-col ${m.sender === "user" ? "items-end" : "items-start"}`}
           >
             <div
-              className={`max-w-[92%] rounded-xl px-3 py-2 text-xs leading-relaxed ${
+              className={`max-w-[90%] rounded-2xl p-3.5 text-xs leading-relaxed transition-all ${
                 m.sender === "user"
-                  ? "bg-cyan-950/80 border border-cyan-800/70 text-cyan-100 shadow-sm"
-                  : "bg-[#0f141c] border border-[#21262d] text-slate-200 shadow-sm"
+                  ? "bg-indigo-50 border border-indigo-200 text-indigo-950 shadow-sm"
+                  : "bg-white shadow-neo-flat border border-white/80 text-slate-800"
               }`}
             >
-              <div className="flex items-center justify-between gap-4 mb-1 border-b border-white/5 pb-1">
-                <span className="font-semibold text-[10px] text-slate-400 uppercase tracking-wider">
-                  {m.sender === "user" ? "YOU (MOBILE)" : "ANTIGRAVITY AGENT"}
+              <div className="flex items-center justify-between gap-4 mb-1.5 border-b border-slate-100 pb-1">
+                <span className="font-bold text-[10px] text-slate-400 uppercase tracking-wider">
+                  {m.sender === "user" ? "YOU (MOBILE COMMANDER)" : "GEMINI 3.8 FLASH AGENT"}
                 </span>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-slate-500">{m.timestamp}</span>
+                  <span className="text-[10px] text-slate-400">{m.timestamp}</span>
                   <button
                     onClick={() => copyToClipboard(m.text, m.id)}
-                    className="p-0.5 text-slate-500 hover:text-slate-300 transition-colors"
-                    title="Copy response"
+                    className="p-1 text-slate-400 hover:text-indigo-600 transition-colors"
+                    title="Copy message"
                   >
                     {copiedId === m.id ? (
-                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                     ) : (
-                      <Copy className="w-3 h-3" />
+                      <Copy className="w-3.5 h-3.5" />
                     )}
                   </button>
                 </div>
               </div>
 
-              <div className="whitespace-pre-wrap font-sans text-[12px] leading-5">
+              <div className="whitespace-pre-wrap font-sans text-[12px] leading-5 text-slate-800">
                 {m.text}
               </div>
             </div>
@@ -346,22 +372,24 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
         ))}
       </div>
 
-      {/* Input Bar */}
-      <div className="shrink-0 px-3 py-2 bg-[#0d1117] border-t border-[#21262d] z-10">
+      {/* 5. Inset Neomorphic Prompt Input Bar */}
+      <div className="shrink-0 p-3 bg-[#f6f8fb]/95 backdrop-blur-xl border-t border-slate-200/60">
         <div className="flex items-center gap-2">
+          {/* Voice to Text Button */}
           <button
             type="button"
             onClick={toggleVoice}
-            className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 transition-all ${
+            className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 transition-all border ${
               isListening
-                ? "bg-rose-900 border-rose-500 text-rose-100 animate-pulse glow-rose"
-                : "bg-[#161b22] border-[#30363d] text-slate-300 hover:text-white"
+                ? "bg-rose-50 border-rose-300 text-rose-600 animate-pulse shadow-neo-pressed"
+                : "bg-white shadow-neo-soft border-white/80 text-slate-600 hover:text-indigo-600 active:shadow-neo-pressed"
             }`}
             title="Voice to Prompt"
           >
             {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
           </button>
 
+          {/* Prompt Well */}
           <div className="flex-1 min-w-0 relative">
             <textarea
               rows={1}
@@ -374,15 +402,16 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
                 }
               }}
               placeholder="Ask Antigravity agent on PC..."
-              className="w-full min-h-[40px] max-h-24 bg-[#161b22] border border-[#30363d] focus:border-cyan-500 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none resize-none font-sans"
+              className="w-full min-h-[40px] max-h-24 neo-well rounded-2xl px-3.5 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none resize-none font-sans"
             />
           </div>
 
+          {/* Send Button */}
           <button
             type="button"
             onClick={() => handleSend()}
             disabled={!prompt.trim() || isSending}
-            className="w-10 h-10 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white flex items-center justify-center shrink-0 font-medium shadow transition-all active:scale-95"
+            className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-500 shadow-neo-soft text-white flex items-center justify-center shrink-0 font-medium disabled:opacity-40 hover:brightness-105 active:scale-95 transition-all"
             title="Inject Prompt"
           >
             <Send className="w-4 h-4" />

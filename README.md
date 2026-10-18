@@ -7,7 +7,11 @@
 
 <p align="center">
   <strong>Control, observe, and steer Google Antigravity AI agents and native PC terminals directly from your smartphone.</strong><br/>
-  Zero-typing Wi-Fi auto-discovery • 6-Digit Quick PIN pairing • 2026 Foldable/Flippable UI engine • Standalone Android APK
+  Featuring the <strong>Google Stitch "Silk Neomorphic"</strong> soft design system • Zero-typing Wi-Fi auto-discovery • 6-Digit Quick PIN pairing • 2026 Foldable/Flippable UI engine • Standalone Windows Desktop App & Android APK
+</p>
+
+<p align="center">
+  <img src="public/stitch-silk-preview.png" alt="GravKtrl Silk Neomorphic UI Preview" width="360" style="border-radius: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.15);" />
 </p>
 
 ---

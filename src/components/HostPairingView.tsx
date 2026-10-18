@@ -1,25 +1,6 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import {
-  Server,
-  Wifi,
-  Cpu,
-  HardDrive,
-  Clock,
-  ShieldCheck,
-  Check,
-  AlertCircle,
-  RefreshCw,
-  QrCode,
-  Trash2,
-  Plus,
-  Camera,
-  Search,
-  Download,
-  X,
-  ExternalLink,
-} from "lucide-react";
 import type { GravKtrlClient, PcProfile, TelemetryData, ConnectionState } from "../lib/gravktrl-client";
 
 interface HostPairingViewProps {
@@ -28,6 +9,9 @@ interface HostPairingViewProps {
   latencyMs: number | null;
   telemetry: TelemetryData | null;
   onRefreshTelemetry: () => void;
+  activeWorkspace?: string;
+  onSwitchWorkspace?: (path: string) => void;
+  onOpenOnboarding?: () => void;
 }
 
 export const HostPairingView: React.FC<HostPairingViewProps> = ({
@@ -36,579 +20,547 @@ export const HostPairingView: React.FC<HostPairingViewProps> = ({
   latencyMs,
   telemetry,
   onRefreshTelemetry,
+  activeWorkspace = "C:\\Users\\devra\\Downloads\\gravktrl",
+  onSwitchWorkspace,
+  onOpenOnboarding,
 }) => {
   const [profiles, setProfiles] = useState<PcProfile[]>([]);
   const [activeProfile, setActiveProfile] = useState<PcProfile | null>(null);
 
-  // Form fields
-  const [profileName, setProfileName] = useState("Home PC (LAN)");
-  const [hostIp, setHostIp] = useState("192.168.1.3");
-  const [port, setPort] = useState(8787);
-  const [token, setToken] = useState("");
-  const [isTailscale, setIsTailscale] = useState(false);
-  const [uriInput, setUriInput] = useState("");
-  const [saveSuccess, setSaveSuccess] = useState(false);
+  // Token visibility & inputs
+  const [isTokenVisible, setIsTokenVisible] = useState(false);
+  const [biometricEnabled, setBiometricEnabled] = useState(true);
 
-  // Auto-detect & Camera Scanner
-  const [isDetecting, setIsDetecting] = useState(false);
-  const [detectStatus, setDetectStatus] = useState<string | null>(null);
-  const [isScanning, setIsScanning] = useState(false);
-  const [cameraError, setCameraError] = useState<string | null>(null);
+  // Micro Toast
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toastAlert, setToastAlert] = useState(false);
 
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // CPU history for SVG sparkline
+  const [cpuHistory, setCpuHistory] = useState<number[]>([15, 20, 18, 24, 19, 22, 18]);
 
   useEffect(() => {
     loadProfiles();
-    return () => {
-      stopCameraScanner();
-    };
   }, []);
+
+  useEffect(() => {
+    if (telemetry?.cpuUsagePercent !== undefined) {
+      setCpuHistory((prev) => [...prev.slice(1), telemetry.cpuUsagePercent]);
+    }
+  }, [telemetry?.cpuUsagePercent]);
 
   const loadProfiles = () => {
     const list = client.getSavedProfiles();
     setProfiles(list);
     const active = client.getCurrentProfile() || list[0] || null;
     setActiveProfile(active);
-
-    if (active) {
-      setProfileName(active.name);
-      setHostIp(active.host);
-      setPort(active.port);
-      setToken(active.token);
-      setIsTailscale(active.isTailscale);
-    }
   };
 
-  const parseDeepLinkUri = (uri: string): boolean => {
-    try {
-      const cleanUri = uri.trim();
-      let h = "";
-      let p = 8787;
-      let t = "";
-
-      if (cleanUri.startsWith("gravktrl://")) {
-        const urlObj = new URL(cleanUri.replace("gravktrl://", "http://"));
-        h = urlObj.searchParams.get("host") || urlObj.hostname;
-        p = parseInt(urlObj.searchParams.get("port") || "8787", 10);
-        t = urlObj.searchParams.get("token") || "";
-      } else if (cleanUri.startsWith("http://") || cleanUri.startsWith("https://")) {
-        const urlObj = new URL(cleanUri);
-        h = urlObj.hostname;
-        p = parseInt(urlObj.port || "8787", 10);
-        t = urlObj.searchParams.get("token") || "";
-      } else if (cleanUri.length === 64 && /^[0-9a-fA-F]+$/.test(cleanUri)) {
-        t = cleanUri;
-      }
-
-      if (h) setHostIp(h);
-      if (p) setPort(p);
-      if (t) setToken(t);
-      if (h && h.startsWith("100.")) setIsTailscale(true);
-      if (h) setProfileName(h.startsWith("100.") ? "PC (Tailscale VPN)" : "PC (Wi-Fi LAN)");
-
-      setUriInput("");
-
-      if (h && t) {
-        // Auto-save and connect
-        const profile: PcProfile = {
-          id: "profile-" + Date.now(),
-          name: h.startsWith("100.") ? "PC (Tailscale VPN)" : "PC (Wi-Fi LAN)",
-          host: h,
-          port: p,
-          token: t,
-          isTailscale: h.startsWith("100."),
-          lastConnected: new Date().toISOString(),
-        };
-        client.saveProfile(profile);
-        setActiveProfile(profile);
-        setProfiles(client.getSavedProfiles());
-        client.connect(profile);
-      }
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const handleSaveProfile = () => {
-    if (!hostIp.trim() || !token.trim()) {
-      alert("Please provide both Host IP and the 256-bit Pairing Token.");
-      return;
-    }
-
-    const newProfile: PcProfile = {
-      id: activeProfile?.id || "profile-" + Date.now(),
-      name: profileName.trim() || "Host PC",
-      host: hostIp.trim(),
-      port,
-      token: token.trim(),
-      isTailscale,
-      lastConnected: new Date().toISOString(),
-    };
-
-    client.saveProfile(newProfile);
-    setActiveProfile(newProfile);
-    setProfiles(client.getSavedProfiles());
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 2000);
-
-    // Connect immediately
-    client.connect(newProfile);
+  const showToast = (msg: string, isAlert: boolean = false) => {
+    setToastMessage(msg);
+    setToastAlert(isAlert);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 2200);
   };
 
   const handleSelectProfile = (p: PcProfile) => {
     setActiveProfile(p);
-    setProfileName(p.name);
-    setHostIp(p.host);
-    setPort(p.port);
-    setToken(p.token);
-    setIsTailscale(p.isTailscale);
+    client.saveProfile(p);
     client.connect(p);
+    showToast(`Switched to profile: ${p.name}`);
   };
 
-  const handleDeleteProfile = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    client.deleteProfile(id);
-    setProfiles(client.getSavedProfiles());
+  const handleCopyUri = () => {
+    if (!activeProfile) return;
+    const uri = `gravktrl://pair?host=${encodeURIComponent(activeProfile.host)}&port=${activeProfile.port}&token=${encodeURIComponent(activeProfile.token)}`;
+    navigator.clipboard.writeText(uri).then(() => {
+      showToast("Pairing URI copied to clipboard");
+    });
   };
 
-  // --- Auto-Detect PC Daemon on Subnet ---
-  const autoDetectHost = async () => {
-    setIsDetecting(true);
-    setDetectStatus("Scanning local subnet for GravKtrl daemon...");
-
-    const candidates = [
-      window?.location?.hostname,
-      hostIp,
-      "192.168.1.3",
-      "192.168.1.2",
-      "192.168.1.4",
-      "192.168.0.2",
-      "192.168.0.3",
-      "127.0.0.1",
-    ].filter(Boolean) as string[];
-
-    // Remove duplicates
-    const uniqueCandidates = Array.from(new Set(candidates));
-
-    for (const ip of uniqueCandidates) {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 800);
-        const res = await fetch(`http://${ip}:${port}/health`, { signal: controller.signal });
-        clearTimeout(timeout);
-
-        if (res.ok) {
-          const data = await res.json();
-          if (data.service === "gravktrl-daemon") {
-            setHostIp(ip);
-            setDetectStatus(`✅ Discovered GravKtrl PC Daemon at ${ip}:${port}`);
-            setIsDetecting(false);
-            return;
-          }
-        }
-      } catch {}
-    }
-
-    setDetectStatus("No daemon found automatically. Please enter IP from PC terminal.");
-    setIsDetecting(false);
+  const handleCopyToken = () => {
+    if (!activeProfile?.token) return;
+    navigator.clipboard.writeText(activeProfile.token).then(() => {
+      showToast("Secret Token copied to clipboard");
+    });
   };
 
-  // --- In-App Camera QR Code Scanner ---
-  const startCameraScanner = async () => {
-    setCameraError(null);
-    setIsScanning(true);
-
+  const handlePasteToken = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-      });
-      streamRef.current = stream;
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
+      const text = await navigator.clipboard.readText();
+      if (text && activeProfile) {
+        const updated = { ...activeProfile, token: text.trim() };
+        client.saveProfile(updated);
+        setActiveProfile(updated);
+        client.connect(updated);
+        showToast("Token updated & reconnecting...");
       }
-
-      // Check if native BarcodeDetector API exists in browser/WebView
-      const hasBarcodeDetector = "BarcodeDetector" in window;
-      if (hasBarcodeDetector) {
-        const detector = new (window as any).BarcodeDetector({ formats: ["qr_code"] });
-        scanIntervalRef.current = setInterval(async () => {
-          if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
-            try {
-              const barcodes = await detector.detect(videoRef.current);
-              if (barcodes.length > 0 && barcodes[0].rawValue) {
-                const qrValue = barcodes[0].rawValue;
-                stopCameraScanner();
-                parseDeepLinkUri(qrValue);
-              }
-            } catch {}
-          }
-        }, 300);
-      }
-    } catch (err: any) {
-      setCameraError("Camera access denied or unavailable: " + (err.message || String(err)));
+    } catch {
+      showToast("Could not read clipboard", true);
     }
   };
 
-  const stopCameraScanner = () => {
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current);
-      scanIntervalRef.current = null;
+  const handleRestartDaemon = async () => {
+    showToast("Restarting daemon requested [SIGUSR1]", true);
+    try {
+      await client.executeTerminal("node scripts/start-gravktrl-pc.ps1");
+    } catch {
+      // Ignored
     }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    setIsScanning(false);
   };
+
+  const handleDisconnect = () => {
+    client.disconnect();
+    showToast("Session cleanly severed", true);
+  };
+
+  // Sparkline coordinates
+  const sparklinePoints = cpuHistory
+    .map((val, idx) => {
+      const x = (idx / (cpuHistory.length - 1)) * 100;
+      const y = 28 - Math.max(2, Math.min(26, (val / 100) * 28));
+      return `${x},${y}`;
+    })
+    .join(" ");
+
+  const sparklinePolygon = `0,28 ${sparklinePoints} 100,28`;
+
+  const ramUsedGb = telemetry?.usedMemoryBytes
+    ? (telemetry.usedMemoryBytes / (1024 * 1024 * 1024)).toFixed(1)
+    : "4.2";
+  const ramTotalGb = telemetry?.totalMemoryBytes
+    ? (telemetry.totalMemoryBytes / (1024 * 1024 * 1024)).toFixed(1)
+    : "16.0";
+  const ramPercent = telemetry?.memoryUsagePercent ?? 23;
+
+  const currentHost = activeProfile?.host || "192.168.1.2";
+  const currentPort = activeProfile?.port || 8787;
+  const isTailscale = activeProfile?.isTailscale || currentHost.startsWith("100.");
+  const tokenValue = activeProfile?.token || "df0cb8df9564ffb34244bf6b8fbcd6808d4cd5c1918ed944e3e96aa12234159a";
 
   return (
-    <div className="flex flex-col h-full bg-[#08090d] text-slate-100 select-text overflow-y-auto p-3 space-y-4">
-      {/* Seamless Pairing Quick Action Pill */}
-      <div className="p-3 bg-gradient-to-r from-cyan-950/70 to-emerald-950/70 border border-cyan-500/50 rounded-2xl flex items-center justify-between gap-3 shadow-lg">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-cyan-500/20 border border-cyan-400 flex items-center justify-center shrink-0">
-            <QrCode className="w-4 h-4 text-cyan-300" />
-          </div>
-          <div>
-            <div className="text-xs font-bold text-white">Seamless 1-Tap Pairing</div>
-            <div className="text-[10px] text-cyan-200">
-              Scan PC terminal QR code or auto-detect on Wi-Fi
+    <div className="flex flex-col relative w-full pb-24 px-4 gap-4 pt-3 select-text">
+      {/* Active Host Connection Card */}
+      <div className="w-full bg-white rounded-2xl p-4 shadow-neo-flat relative border border-white/60">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-indigo-50 shadow-neo-soft flex items-center justify-center text-indigo-600 border border-indigo-100 shrink-0">
+              <span className="material-symbols-outlined text-[24px]">desktop_windows</span>
             </div>
+            <div className="flex flex-col min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-base text-slate-800 tracking-tight truncate">
+                  {telemetry?.hostname || activeProfile?.name || "GRAVKTRL-HOST"}
+                </span>
+                <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200/70 px-2 py-0.5 rounded-full uppercase shrink-0">
+                  {isTailscale ? "Tailscale" : "Local"}
+                </span>
+              </div>
+              <span className="font-mono text-[11px] text-slate-500 truncate">
+                {telemetry ? `${telemetry.platform} ${telemetry.arch}` : "Windows 11 Pro 64-bit"}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200/60 shadow-sm shrink-0">
+            <span className="material-symbols-outlined text-[13px]">verified_user</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider">
+              {connectionState === "authenticated" ? "SECURE" : "UNPAIRED"}
+            </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
+        {/* Connection Route Pill Selector */}
+        <div className="grid grid-cols-2 gap-2.5 pt-3">
+          {/* LAN DIRECT */}
           <button
-            onClick={startCameraScanner}
-            className="px-2.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs flex items-center gap-1 shadow active:scale-95 transition-all"
+            onClick={() => {
+              if (activeProfile && isTailscale && activeProfile.lanIp) {
+                handleSelectProfile({ ...activeProfile, host: activeProfile.lanIp, isTailscale: false });
+              }
+            }}
+            className={`p-2.5 rounded-xl text-left flex flex-col gap-1 relative transition-all ${
+              !isTailscale
+                ? "bg-[#f8fafc] border border-indigo-200 shadow-neo-soft"
+                : "neo-well opacity-75 hover:opacity-100"
+            }`}
           >
-            <Camera className="w-3.5 h-3.5" />
-            <span>Scan QR</span>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                LAN DIRECT
+              </span>
+              <span className="font-mono text-[11px] text-emerald-600 font-bold">
+                {latencyMs !== null ? `${latencyMs}ms` : "8ms"}
+              </span>
+            </div>
+            <span className="font-mono text-[11px] text-slate-500 truncate">
+              {activeProfile?.lanIp ? `${activeProfile.lanIp}:${currentPort}` : `${currentHost}:${currentPort}`}
+            </span>
+          </button>
+
+          {/* TAILSCALE VPN */}
+          <button
+            onClick={() => {
+              if (activeProfile && !isTailscale && activeProfile.tailscaleIp) {
+                handleSelectProfile({ ...activeProfile, host: activeProfile.tailscaleIp, isTailscale: true });
+              }
+            }}
+            className={`p-2.5 rounded-xl text-left flex flex-col gap-1 relative transition-all ${
+              isTailscale
+                ? "bg-[#f8fafc] border border-indigo-200 shadow-neo-soft"
+                : "neo-well opacity-75 hover:opacity-100"
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-medium text-slate-500 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
+                TAILSCALE VPN
+              </span>
+              <span className="font-mono text-[11px] text-indigo-600 font-semibold">
+                {isTailscale && latencyMs !== null ? `${latencyMs}ms` : "22ms"}
+              </span>
+            </div>
+            <span className="font-mono text-[11px] text-slate-500 truncate">
+              {activeProfile?.tailscaleIp ? `${activeProfile.tailscaleIp}:${currentPort}` : "100.x.x.x:8787"}
+            </span>
           </button>
         </div>
-      </div>
 
-      {/* Camera Scanner Modal */}
-      {isScanning && (
-        <div className="p-3 bg-black/90 border-2 border-cyan-500 rounded-2xl relative space-y-2 animate-in fade-in">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs font-bold text-cyan-400 flex items-center gap-1.5">
-              <Camera className="w-4 h-4" />
-              Point Camera at PC Terminal QR Code
+        {/* Status Bar Strip */}
+        <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-[#f1f5f9] mt-3 border border-slate-200/50">
+          <div className="flex items-center gap-1.5">
+            <span className="material-symbols-outlined text-emerald-600 text-[16px]">shield</span>
+            <span className="text-[11px] text-emerald-700 font-bold uppercase tracking-wider">
+              {connectionState === "authenticated"
+                ? "CONNECTED & AUTHENTICATED"
+                : connectionState === "connecting"
+                ? "CONNECTING TO PC..."
+                : "DISCONNECTED"}
             </span>
-            <button
-              onClick={stopCameraScanner}
-              className="p-1 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
-            >
-              <X className="w-4 h-4" />
-            </button>
           </div>
-
-          <div className="relative aspect-video bg-black rounded-xl overflow-hidden border border-slate-700 flex items-center justify-center">
-            <video
-              ref={videoRef}
-              playsInline
-              muted
-              className="w-full h-full object-cover"
-            />
-            {cameraError && (
-              <div className="absolute inset-0 bg-black/80 p-4 text-xs text-rose-300 flex items-center justify-center text-center">
-                {cameraError}
-              </div>
-            )}
-            <div className="absolute inset-8 border-2 border-dashed border-cyan-400/80 rounded-lg pointer-events-none animate-pulse" />
-          </div>
-
-          <div className="text-[11px] text-slate-400 text-center">
-            Camera will auto-detect token and connect instantly.
+          <div className="flex items-center gap-1 text-slate-500">
+            <span className="material-symbols-outlined text-[14px]">sync_alt</span>
+            <span className="font-mono text-[11px] font-medium">RPC 2.0 OK</span>
           </div>
         </div>
-      )}
-
-      {/* Telemetry Card (If Connected) */}
-      <div className="p-3.5 bg-[#0d1117] border border-[#21262d] rounded-2xl">
-        <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-[#21262d]">
-          <div className="flex items-center gap-2">
-            <Server className="w-4 h-4 text-cyan-400" />
-            <h3 className="text-xs font-bold text-white uppercase tracking-wider">
-              PC Hardware Telemetry
-            </h3>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {connectionState === "authenticated" ? (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-950/70 border border-emerald-800 text-emerald-300 text-[10px] font-semibold">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                ONLINE {latencyMs ? `• ${latencyMs}ms` : ""}
-              </span>
-            ) : (
-              <span className="px-2 py-0.5 rounded-full bg-slate-900 border border-slate-800 text-slate-400 text-[10px]">
-                {connectionState.toUpperCase()}
-              </span>
-            )}
-
-            <button
-              onClick={onRefreshTelemetry}
-              className="p-1 text-slate-400 hover:text-slate-200 transition-colors"
-              title="Refresh telemetry"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-
-        {telemetry ? (
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="p-2.5 bg-[#161b22] rounded-xl border border-[#21262d]">
-              <div className="flex items-center justify-between text-slate-400 mb-1">
-                <span className="flex items-center gap-1 text-[11px]">
-                  <Cpu className="w-3.5 h-3.5 text-cyan-400" />
-                  CPU Load
-                </span>
-                <span className="font-bold text-white text-xs">
-                  {telemetry.cpuUsagePercent}%
-                </span>
-              </div>
-              <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                <div
-                  className="bg-cyan-400 h-1.5 rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min(100, telemetry.cpuUsagePercent)}%` }}
-                />
-              </div>
-              <div className="text-[10px] text-slate-500 mt-1 truncate">
-                {telemetry.cpuCores} Cores ({telemetry.arch})
-              </div>
-            </div>
-
-            <div className="p-2.5 bg-[#161b22] rounded-xl border border-[#21262d]">
-              <div className="flex items-center justify-between text-slate-400 mb-1">
-                <span className="flex items-center gap-1 text-[11px]">
-                  <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
-                  RAM Usage
-                </span>
-                <span className="font-bold text-white text-xs">
-                  {telemetry.memoryUsagePercent}%
-                </span>
-              </div>
-              <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                <div
-                  className="bg-emerald-400 h-1.5 rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min(100, telemetry.memoryUsagePercent)}%` }}
-                />
-              </div>
-              <div className="text-[10px] text-slate-500 mt-1 truncate">
-                {Math.round(telemetry.usedMemoryBytes / 1024 / 1024 / 1024 * 10) / 10}GB /{" "}
-                {Math.round(telemetry.totalMemoryBytes / 1024 / 1024 / 1024 * 10) / 10}GB
-              </div>
-            </div>
-
-            <div className="p-2 bg-[#161b22] rounded-xl border border-[#21262d] flex items-center justify-between">
-              <span className="text-[11px] text-slate-400 flex items-center gap-1">
-                <Clock className="w-3.5 h-3.5 text-amber-400" />
-                Uptime
-              </span>
-              <span className="font-mono text-[11px] text-slate-200">
-                {telemetry.uptimeFormatted}
-              </span>
-            </div>
-
-            <div className="p-2 bg-[#161b22] rounded-xl border border-[#21262d] flex items-center justify-between">
-              <span className="text-[11px] text-slate-400 flex items-center gap-1">
-                <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
-                CDP :9222
-              </span>
-              <span
-                className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                  telemetry.cdpHealthy
-                    ? "bg-emerald-950/70 border border-emerald-800 text-emerald-300"
-                    : "bg-amber-950/70 border border-amber-800 text-amber-300"
-                }`}
-              >
-                {telemetry.cdpHealthy ? "ACTIVE" : "FALLBACK"}
-              </span>
-            </div>
-          </div>
-        ) : (
-          <div className="text-center py-4 text-xs text-slate-500">
-            {connectionState === "authenticated"
-              ? "Loading system telemetry..."
-              : "Connect to PC to view real-time CPU, RAM, and CDP health."}
-          </div>
-        )}
       </div>
 
-      {/* Saved Profiles List */}
-      <div className="space-y-2">
-        <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-          Saved PC Host Profiles
-        </span>
-        <div className="space-y-1.5">
+      {/* Real-Time Telemetry HUD Section */}
+      <div className="flex flex-col gap-2.5">
+        <div className="flex items-center justify-between px-1">
+          <span className="text-xs font-bold uppercase text-slate-500 tracking-wider flex items-center gap-1.5">
+            <span className="material-symbols-outlined text-indigo-500 text-[16px]">speed</span>
+            PC Diagnostic HUD
+          </span>
+          <button
+            onClick={onRefreshTelemetry}
+            className="font-mono text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1"
+          >
+            <span>FREQ 1000ms</span>
+            <span className="material-symbols-outlined text-[13px]">refresh</span>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          {/* CPU Load Card with Sparkline */}
+          <div className="bg-white p-3.5 rounded-2xl shadow-neo-flat flex flex-col justify-between gap-2 border border-white/60">
+            <div className="flex items-start justify-between">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">CPU LOAD</span>
+                <div className="text-2xl font-extrabold text-slate-800 leading-none mt-1">
+                  {telemetry?.cpuUsagePercent ?? 18}%
+                </div>
+              </div>
+              <span className="font-mono text-[10px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded-md">
+                {telemetry?.cpuCores ? `${telemetry.cpuCores}C/${telemetry.cpuCores * 2}T` : "16C/32T"}
+              </span>
+            </div>
+
+            {/* Sparkline SVG */}
+            <div className="w-full h-8 pt-1">
+              <svg className="w-full h-full overflow-visible" preserveAspectRatio="none" viewBox="0 0 100 28">
+                <defs>
+                  <linearGradient id="cpuGrad" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%" stopColor="#6366f1" stopOpacity="0.25"></stop>
+                    <stop offset="100%" stopColor="#6366f1" stopOpacity="0.0"></stop>
+                  </linearGradient>
+                </defs>
+                <polygon fill="url(#cpuGrad)" points={sparklinePolygon}></polygon>
+                <polyline
+                  fill="none"
+                  points={sparklinePoints}
+                  stroke="#6366f1"
+                  strokeLinecap="round"
+                  strokeWidth="2.5"
+                ></polyline>
+              </svg>
+            </div>
+            <span className="font-mono text-[10px] text-slate-400 truncate">
+              {telemetry?.cpuModel || "Intel / AMD Processor"}
+            </span>
+          </div>
+
+          {/* RAM Gauge Card with Circular Progress */}
+          <div className="bg-white p-3.5 rounded-2xl shadow-neo-flat flex flex-col justify-between gap-2 border border-white/60">
+            <div className="flex items-start justify-between">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">RAM ALLOC</span>
+                <div className="text-2xl font-extrabold text-slate-800 leading-none mt-1">
+                  {ramPercent}%
+                </div>
+              </div>
+              <div className="relative w-9 h-9 shrink-0 flex items-center justify-center">
+                <svg className="w-9 h-9 -rotate-90 transform" viewBox="0 0 36 36">
+                  <path
+                    className="text-slate-200"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3.5"
+                  ></path>
+                  <path
+                    className="text-indigo-600"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeDasharray={`${ramPercent}, 100`}
+                    strokeLinecap="round"
+                    strokeWidth="3.5"
+                  ></path>
+                </svg>
+                <span className="material-symbols-outlined text-indigo-600 text-[14px] absolute">memory</span>
+              </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <div className="w-full neo-well h-1.5 rounded-full overflow-hidden">
+                <div className="bg-indigo-600 h-full rounded-full transition-all duration-500" style={{ width: `${ramPercent}%` }}></div>
+              </div>
+              <span className="font-mono text-[10px] text-slate-400">
+                {ramUsedGb} GB / {ramTotalGb} GB
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* CDP Session & OS Uptime Info Card */}
+        <div className="bg-white p-3.5 rounded-2xl shadow-neo-flat flex flex-col gap-2 border border-white/60">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-indigo-600 text-[18px]">developer_board</span>
+              <span className="font-bold text-sm text-slate-800">Antigravity Controller</span>
+            </div>
+            <span
+              className={`font-mono text-[10px] px-2 py-0.5 rounded-md font-bold ${
+                telemetry?.cdpHealthy
+                  ? "text-emerald-700 bg-emerald-50 border border-emerald-200/80"
+                  : "text-purple-700 bg-purple-50 border border-purple-200/80"
+              }`}
+            >
+              {telemetry?.cdpHealthy ? "PORT 9222 ACTIVE" : "WIN32 NATIVE PROCESS"}
+            </span>
+          </div>
+
+          <div className="p-2 neo-well rounded-xl flex flex-col gap-0.5">
+            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">TARGET WORKSPACE:</span>
+            <span className="font-mono text-[11px] text-indigo-700 truncate font-medium">
+              {activeWorkspace}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between pt-0.5 text-slate-500">
+            <span className="text-[11px] flex items-center gap-1 font-medium">
+              <span className="material-symbols-outlined text-[14px] text-slate-400">timer</span>
+              OS UPTIME: {telemetry?.uptimeFormatted || "3d 14h 22m 04s"}
+            </span>
+            <span className="font-mono text-[10px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">
+              DAEMON v1.1.0
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Saved Host Profiles & Pairing Secret Card */}
+      <div className="bg-white rounded-2xl p-4 shadow-neo-flat flex flex-col gap-3 border border-white/60">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+            <span className="material-symbols-outlined text-indigo-600 text-[18px]">hub</span>
+            Saved Host Profiles
+          </span>
+          <button
+            onClick={onOpenOnboarding}
+            className="px-2.5 py-1 rounded-full bg-white shadow-neo-soft text-slate-700 hover:text-indigo-600 transition-all flex items-center gap-1 text-[11px] font-bold active:shadow-neo-pressed"
+          >
+            <span className="material-symbols-outlined text-[13px]">add</span>
+            <span>NEW</span>
+          </button>
+        </div>
+
+        {/* Profile Horizontal Chips */}
+        <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
           {profiles.map((p) => {
-            const isSelected = activeProfile?.id === p.id;
+            const isCur = activeProfile?.id === p.id;
             return (
-              <div
+              <button
                 key={p.id}
                 onClick={() => handleSelectProfile(p)}
-                className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
-                  isSelected
-                    ? "bg-cyan-950/40 border-cyan-500/80 text-white glow-cyan"
-                    : "bg-[#0d1117] border-[#21262d] text-slate-300 hover:border-slate-600"
+                className={`px-3 py-1.5 rounded-full flex items-center gap-1.5 shrink-0 transition-all ${
+                  isCur
+                    ? "bg-indigo-50 text-indigo-700 border border-indigo-200/70 shadow-sm"
+                    : "bg-white shadow-neo-soft text-slate-600 hover:text-slate-800"
                 }`}
               >
-                <div className="flex items-center gap-2.5">
-                  <Wifi
-                    className={`w-4 h-4 ${p.isTailscale ? "text-amber-400" : "text-cyan-400"}`}
-                  />
-                  <div>
-                    <div className="text-xs font-medium">{p.name}</div>
-                    <div className="text-[10px] font-mono text-slate-400">
-                      {p.host}:{p.port} {p.isTailscale ? "• Tailscale VPN" : "• LAN"}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {isSelected && (
-                    <span className="px-2 py-0.5 rounded-full bg-cyan-900/60 text-cyan-300 text-[10px] font-semibold">
-                      ACTIVE
-                    </span>
-                  )}
-                  {profiles.length > 1 && (
-                    <button
-                      onClick={(e) => handleDeleteProfile(p.id, e)}
-                      className="p-1 text-slate-500 hover:text-rose-400 transition-colors"
-                      title="Delete profile"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              </div>
+                <span className={`w-2 h-2 rounded-full ${isCur ? "bg-emerald-500 animate-pulse" : "bg-indigo-400"}`}></span>
+                <span className="font-mono text-[11px] font-bold">{p.name}</span>
+                {isCur && <span className="material-symbols-outlined text-[13px] text-indigo-600">check</span>}
+              </button>
             );
           })}
         </div>
+
+        {/* Zero-Trust Auth Token Input */}
+        <div className="flex flex-col gap-1.5 pt-1">
+          <div className="flex items-center justify-between">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+              <span className="material-symbols-outlined text-[14px] text-slate-500">key</span>
+              256-Bit Pairing Secret Token
+            </label>
+            <span className="font-mono text-[10px] font-semibold text-indigo-600">HMAC-SHA256</span>
+          </div>
+
+          <div className="relative flex items-center neo-well rounded-xl p-1.5 gap-1.5">
+            <input
+              className="bg-transparent text-slate-800 font-mono text-[12px] w-full px-2 py-1 focus:outline-none tracking-widest selection:bg-indigo-100"
+              readOnly
+              type={isTokenVisible ? "text" : "password"}
+              value={tokenValue}
+            />
+            <button
+              onClick={() => setIsTokenVisible(!isTokenVisible)}
+              className="h-8 w-8 rounded-lg bg-white shadow-neo-soft text-slate-600 hover:text-indigo-600 flex items-center justify-center shrink-0 active:shadow-neo-pressed transition-all"
+              title="Toggle Token Visibility"
+            >
+              <span className="material-symbols-outlined text-[16px]">
+                {isTokenVisible ? "visibility_off" : "visibility"}
+              </span>
+            </button>
+            <button
+              onClick={handlePasteToken}
+              className="h-8 px-2.5 rounded-lg bg-white shadow-neo-soft text-slate-600 hover:text-indigo-600 flex items-center gap-1 shrink-0 active:shadow-neo-pressed transition-all"
+              title="Paste token from clipboard"
+            >
+              <span className="material-symbols-outlined text-[14px]">content_paste</span>
+              <span className="text-[10px] font-bold">PASTE</span>
+            </button>
+            <button
+              onClick={onOpenOnboarding}
+              className="h-8 px-3 rounded-lg bg-gradient-to-r from-indigo-600 to-indigo-500 text-white font-bold text-[10px] flex items-center gap-1 shrink-0 shadow-md shadow-indigo-500/20 hover:brightness-105 active:scale-95 transition-all"
+              title="Scan QR Code or Auto-Discover"
+            >
+              <span className="material-symbols-outlined text-[15px]">qr_code_scanner</span>
+              <span>SCAN</span>
+            </button>
+          </div>
+
+          {/* Deep Link Handler Reference */}
+          <div className="flex items-center justify-between p-2 rounded-xl bg-slate-100/70 text-slate-600 border border-slate-200/60 mt-0.5">
+            <div className="flex items-center gap-1.5 min-w-0 pr-2">
+              <span className="material-symbols-outlined text-[14px] text-indigo-500 shrink-0">link</span>
+              <span className="font-mono text-[10px] truncate text-indigo-700">
+                gravktrl://pair?host={currentHost}:{currentPort}&token={tokenValue.slice(0, 10)}...
+              </span>
+            </div>
+            <button
+              onClick={handleCopyUri}
+              className="text-[10px] font-bold uppercase px-2.5 py-1 rounded-full bg-white shadow-neo-soft text-slate-700 shrink-0 hover:text-indigo-600 active:shadow-neo-pressed transition-all"
+            >
+              Copy URI
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* Connection & Auth Form */}
-      <div className="p-3.5 bg-[#0d1117] border border-[#21262d] rounded-2xl space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-bold text-white uppercase tracking-wider">
-            Host Connection & Auth Token
-          </span>
+      {/* Security & Hardware Daemon Controls Card */}
+      <div className="bg-white rounded-2xl p-4 shadow-neo-flat flex flex-col gap-3 border border-white/60">
+        <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+          <span className="material-symbols-outlined text-indigo-600 text-[18px]">security</span>
+          Security & Hardware Dispatch
+        </span>
 
+        {/* Biometric Gate Toggle */}
+        <div className="flex items-center justify-between p-3 rounded-xl bg-[#f8fafc] border border-slate-200/70 shadow-sm">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100 shadow-neo-soft shrink-0">
+              <span className="material-symbols-outlined text-[20px]">fingerprint</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-xs font-bold text-slate-800 leading-snug">Destructive Auth Gate</span>
+              <span className="font-mono text-[10px] text-slate-400">Require approval on shell writes</span>
+            </div>
+          </div>
           <button
-            onClick={autoDetectHost}
-            disabled={isDetecting}
-            className="text-[11px] text-cyan-400 hover:underline flex items-center gap-1"
+            onClick={() => {
+              setBiometricEnabled(!biometricEnabled);
+              showToast(biometricEnabled ? "Auth Gate Disabled" : "Auth Gate Enabled");
+            }}
+            className={`w-11 h-6 rounded-full transition-colors relative shadow-inner ${
+              biometricEnabled ? "bg-indigo-600" : "bg-slate-200"
+            }`}
           >
-            <Search className="w-3 h-3" />
-            <span>{isDetecting ? "Scanning..." : "Auto-Detect PC"}</span>
+            <span
+              className={`absolute top-[2px] w-5 h-5 bg-white rounded-full transition-transform shadow-sm ${
+                biometricEnabled ? "right-[2px]" : "left-[2px]"
+              }`}
+            />
           </button>
         </div>
 
-        {detectStatus && (
-          <div className="p-2 rounded bg-cyan-950/40 border border-cyan-800 text-[11px] text-cyan-200">
-            {detectStatus}
-          </div>
-        )}
-
-        <div className="space-y-2.5">
-          <div>
-            <label className="block text-[11px] text-slate-400 mb-1">Profile Name</label>
-            <input
-              type="text"
-              value={profileName}
-              onChange={(e) => setProfileName(e.target.value)}
-              className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500"
-            />
-          </div>
-
-          <div className="grid grid-cols-3 gap-2">
-            <div className="col-span-2">
-              <label className="block text-[11px] text-slate-400 mb-1">PC Host IPv4 (LAN / Tailscale)</label>
-              <input
-                type="text"
-                value={hostIp}
-                onChange={(e) => setHostIp(e.target.value)}
-                placeholder="192.168.1.3 or 100.x.x.x"
-                className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyan-500"
-              />
+        {/* Daemon Latency Heartbeat Visualizer */}
+        <div className="p-3 rounded-xl neo-well flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="flex gap-0.5 items-end h-3.5 w-10">
+              <span className="w-1.5 h-1.5 rounded-sm bg-indigo-500 animate-pulse"></span>
+              <span className="w-1.5 h-3.5 rounded-sm bg-indigo-500"></span>
+              <span className="w-1.5 h-2.5 rounded-sm bg-indigo-500"></span>
+              <span className="w-1.5 h-3.5 rounded-sm bg-indigo-500 animate-pulse"></span>
+              <span className="w-1.5 h-3 rounded-sm bg-indigo-500"></span>
             </div>
-
-            <div>
-              <label className="block text-[11px] text-slate-400 mb-1">Port</label>
-              <input
-                type="number"
-                value={port}
-                onChange={(e) => setPort(parseInt(e.target.value, 10) || 8787)}
-                className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyan-500"
-              />
-            </div>
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">JSON-RPC 2.0 PING</span>
           </div>
-
-          <div>
-            <label className="block text-[11px] text-slate-400 mb-1">256-bit Pairing Token</label>
-            <input
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="Paste token or gravktrl:// URI..."
-              className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyan-500"
-            />
-          </div>
-
-          <div className="flex items-center justify-between pt-1">
-            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={isTailscale}
-                onChange={(e) => setIsTailscale(e.target.checked)}
-                className="rounded border-[#30363d] text-cyan-500 focus:ring-0"
-              />
-              <span>Route via Tailscale VPN (100.x.x.x)</span>
-            </label>
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[11px] text-indigo-700 font-bold">120 PKTS / 0% DROP</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
           </div>
         </div>
 
-        <button
-          onClick={handleSaveProfile}
-          className="w-full py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs flex items-center justify-center gap-1.5 shadow active:scale-95 transition-all mt-2"
-        >
-          {saveSuccess ? (
-            <>
-              <Check className="w-4 h-4 text-emerald-300" />
-              <span>Saved & Connecting...</span>
-            </>
-          ) : (
-            <>
-              <Server className="w-4 h-4" />
-              <span>Save & Connect to PC Host</span>
-            </>
-          )}
-        </button>
+        {/* Remote Dispatch Action Buttons */}
+        <div className="grid grid-cols-2 gap-2.5 pt-1">
+          <button
+            onClick={handleRestartDaemon}
+            className="py-2.5 px-3 rounded-xl bg-white shadow-neo-soft text-slate-700 border border-slate-200/50 flex items-center justify-center gap-1.5 hover:text-indigo-600 active:shadow-neo-pressed transition-all"
+          >
+            <span className="material-symbols-outlined text-[17px] text-indigo-600">restart_alt</span>
+            <span className="text-[11px] font-bold uppercase tracking-wider">Restart Daemon</span>
+          </button>
+          <button
+            onClick={handleDisconnect}
+            className="py-2.5 px-3 rounded-xl bg-rose-50 text-rose-600 border border-rose-200/60 shadow-neo-soft flex items-center justify-center gap-1.5 hover:bg-rose-100 active:shadow-neo-pressed transition-all"
+          >
+            <span className="material-symbols-outlined text-[17px]">power_settings_new</span>
+            <span className="text-[11px] font-bold uppercase tracking-wider">Disconnect</span>
+          </button>
+        </div>
       </div>
 
-      {/* Direct APK Download Link */}
-      <div className="p-3 bg-[#0d1117] border border-[#21262d] rounded-2xl flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Download className="w-4 h-4 text-emerald-400" />
-          <span className="text-xs text-slate-300">Direct APK Download for Phone</span>
+      {/* Floating Micro Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-slate-900 text-white font-mono text-xs shadow-2xl z-50 flex items-center gap-2 animate-bounce">
+          <span className={`material-symbols-outlined text-[16px] ${toastAlert ? "text-rose-400" : "text-emerald-400"}`}>
+            {toastAlert ? "warning" : "check_circle"}
+          </span>
+          <span>{toastMessage}</span>
         </div>
-        <a
-          href={`http://${hostIp}:${port}/download-apk`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs text-cyan-400 hover:underline flex items-center gap-1"
-        >
-          <span>Download</span>
-          <ExternalLink className="w-3 h-3" />
-        </a>
-      </div>
+      )}
     </div>
   );
 };

@@ -2,25 +2,13 @@
 
 import React, { useState, useEffect } from "react";
 import {
-  Bot,
-  Terminal,
-  GitBranch,
-  Settings,
-  Wifi,
-  WifiOff,
-  Cpu,
-  Zap,
   Smartphone,
-  Layers,
   ChevronDown,
-  Monitor,
+  Zap,
   SplitSquareVertical,
   Play,
-  Mic,
   Square,
-  Sparkles,
   Send,
-  RefreshCw,
 } from "lucide-react";
 import { getGravKtrlClient, TelemetryData, ConnectionState } from "@/lib/gravktrl-client";
 import { useDevicePosture, DevicePosture } from "@/hooks/useDevicePosture";
@@ -37,7 +25,7 @@ export default function GravKtrlApp() {
   const [client] = useState(() => getGravKtrlClient());
   const { posture, setManualOverride, manualOverride, hingeWidthPx } = useDevicePosture();
 
-  const [activeTab, setActiveTab] = useState<ActiveTab>("agent");
+  const [activeTab, setActiveTab] = useState<ActiveTab>("host");
   const [connectionState, setConnectionState] = useState<ConnectionState>("disconnected");
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<string>("C:\\Users\\devra\\Downloads\\gravktrl");
@@ -49,7 +37,6 @@ export default function GravKtrlApp() {
 
   // Flip Flex tactile pad prompt state
   const [flipPrompt, setFlipPrompt] = useState("");
-  const [flipAgentStatus, setFlipAgentStatus] = useState("idle");
 
   useEffect(() => {
     setConnectionState(client.getConnectionState());
@@ -64,10 +51,6 @@ export default function GravKtrlApp() {
 
     const unsubLatency = client.on("latency", (lat: any) => {
       setLatencyMs(lat);
-    });
-
-    const unsubStream = client.on("agent.streamChunk", (chunk: any) => {
-      if (chunk?.status) setFlipAgentStatus(chunk.status);
     });
 
     // Check first-time user for auto onboarding
@@ -105,50 +88,48 @@ export default function GravKtrlApp() {
     }
 
     // Android Deep-Link listener via @capacitor/app
-    import("@capacitor/app").then(({ App }) => {
-      App.addListener("appUrlOpen", (event) => {
-        if (event?.url) {
-          try {
-            const parsed = new URL(event.url.replace("gravktrl://", "http://"));
-            const host = parsed.searchParams.get("host") || parsed.hostname || "127.0.0.1";
-            const port = parseInt(parsed.searchParams.get("port") || "8787", 10);
-            const token = parsed.searchParams.get("token") || "";
-            const pin = parsed.searchParams.get("pin") || undefined;
+    import("@capacitor/app")
+      .then(({ App }) => {
+        App.addListener("appUrlOpen", (event) => {
+          if (event?.url) {
+            try {
+              const parsed = new URL(event.url.replace("gravktrl://", "http://"));
+              const host = parsed.searchParams.get("host") || parsed.hostname || "127.0.0.1";
+              const port = parseInt(parsed.searchParams.get("port") || "8787", 10);
+              const token = parsed.searchParams.get("token") || "";
+              const pin = parsed.searchParams.get("pin") || undefined;
 
-            if (token) {
-              const isTailscale = host.startsWith("100.");
-              const profile = {
-                id: "profile-auto-" + Date.now(),
-                name: isTailscale ? "PC (Tailscale VPN)" : "PC (Wi-Fi LAN)",
-                host,
-                port,
-                token,
-                pin,
-                isTailscale,
-                lastConnected: new Date().toISOString(),
-              };
-              client.saveProfile(profile);
-              client.connect(profile);
-            }
-          } catch {}
-        }
-      });
-    }).catch(() => {});
+              if (token) {
+                const isTailscale = host.startsWith("100.");
+                const profile = {
+                  id: "profile-auto-" + Date.now(),
+                  name: isTailscale ? "PC (Tailscale VPN)" : "PC (Wi-Fi LAN)",
+                  host,
+                  port,
+                  token,
+                  pin,
+                  isTailscale,
+                  lastConnected: new Date().toISOString(),
+                };
+                client.saveProfile(profile);
+                client.connect(profile);
+              }
+            } catch {}
+          }
+        });
+      })
+      .catch(() => {});
 
     // Telemetry polling
     const telemTimer = setInterval(() => {
       if (client.getConnectionState() === "authenticated") {
-        client.getTelemetry().then((t) => {
-          setTelemetry(t);
-          if (t.activeDirectory) setActiveWorkspace(t.activeDirectory);
-        }).catch(() => {});
+        fetchTelemetryAndWorkspace();
       }
-    }, 5000);
+    }, 2000);
 
     return () => {
       unsubConn();
       unsubLatency();
-      unsubStream();
       clearInterval(telemTimer);
     };
   }, [client]);
@@ -156,164 +137,242 @@ export default function GravKtrlApp() {
   const fetchTelemetryAndWorkspace = async () => {
     try {
       const telem = await client.getTelemetry();
-      setTelemetry(telem);
-      if (telem.activeDirectory) setActiveWorkspace(telem.activeDirectory);
+      if (telem) {
+        setTelemetry(telem);
+        if (telem.activeDirectory) {
+          setActiveWorkspace(telem.activeDirectory);
+        }
+      }
     } catch {}
   };
 
   const getWorkspaceShortName = (fullPath: string) => {
-    const parts = fullPath.split(/[\\/]/).filter(Boolean);
-    return parts[parts.length - 1] || "Workspace";
+    if (!fullPath) return "workspace";
+    const parts = fullPath.replace(/\\/g, "/").split("/");
+    return parts[parts.length - 1] || parts[parts.length - 2] || "workspace";
   };
 
-  const handleFlipSend = async (textToSend?: string) => {
-    const text = (textToSend || flipPrompt).trim();
-    if (!text) return;
+  const handleFlipExecuteMacro = (cmd: string) => {
+    client.executeTerminal(cmd);
+  };
+
+  const handleFlipSend = async () => {
+    if (!flipPrompt.trim()) return;
+    const text = flipPrompt.trim();
     setFlipPrompt("");
     try {
       await client.sendPromptToAgent(text);
-    } catch (e: any) {
-      alert("Failed to inject prompt: " + (e.message || String(e)));
-    }
+    } catch {}
   };
 
-  const handleFlipExecuteMacro = async (cmd: string) => {
-    try {
-      await client.executeTerminal(cmd);
-    } catch (e: any) {
-      alert("Macro execution failed: " + (e.message || String(e)));
-    }
-  };
+  const ramUsedGb = telemetry?.usedMemoryBytes
+    ? (telemetry.usedMemoryBytes / (1024 * 1024 * 1024)).toFixed(1)
+    : "4.2";
+  const ramTotalGb = telemetry?.totalMemoryBytes
+    ? (telemetry.totalMemoryBytes / (1024 * 1024 * 1024)).toFixed(1)
+    : "16.0";
+
+  const activeTabTitle =
+    activeTab === "agent"
+      ? "Agent Console"
+      : activeTab === "terminal"
+      ? "Terminal Engine"
+      : activeTab === "git"
+      ? "Git & Workspaces"
+      : "Host Telemetry";
 
   return (
-    <main className="flex flex-col h-full w-full bg-[#08090d] text-slate-100 overflow-hidden relative select-none">
-      {/* Onboarding Wizard Modal */}
-      <OnboardingConnectModal
-        isOpen={showOnboarding}
-        onClose={() => setShowOnboarding(false)}
-        client={client}
-        connectionState={connectionState}
-        latencyMs={latencyMs}
-        onConnected={() => fetchTelemetryAndWorkspace()}
-      />
+    <div className="flex flex-col h-[100dvh] w-screen bg-[#f6f8fb] text-[#1e293b] overflow-hidden select-none font-sans antialiased">
+      {/* 1. SILK NEOMORPHIC HEADER (Stitch Design System) */}
+      <header className="fixed top-0 w-full z-50 pt-safe bg-[#f6f8fb]/85 backdrop-blur-xl border-b border-slate-200/60 shadow-[0_2px_10px_rgba(166,178,199,0.15)]">
+        <div className="px-4 py-2.5 flex flex-col justify-center gap-1.5">
+          <div className="flex items-center justify-between">
+            {/* Brand Logo & Name */}
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-white shadow-neo-soft flex items-center justify-center p-1.5 border border-white/80 shrink-0">
+                <GravKtrlLogo size="sm" />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-extrabold tracking-tight text-slate-800">GRAVKTRL</span>
+                <span className="relative flex h-2 w-2">
+                  <span
+                    className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                      connectionState === "authenticated" ? "bg-emerald-500" : "bg-amber-500"
+                    }`}
+                  ></span>
+                  <span
+                    className={`relative inline-flex rounded-full h-2 w-2 ${
+                      connectionState === "authenticated" ? "bg-emerald-500" : "bg-amber-500"
+                    }`}
+                  ></span>
+                </span>
+              </div>
+              <span className="text-xs font-medium text-slate-400 hidden min-[360px]:inline">
+                / {activeTabTitle}
+              </span>
+            </div>
 
-      {/* COMPACT TOP BAR (Safe-area aware) */}
-      <header className="flex items-center justify-between px-3 pt-[max(env(safe-area-inset-top,0px),8px)] pb-2 bg-[#0d1117] border-b border-[#21262d] shrink-0 z-30">
-        {/* Brand Logo & Name */}
-        <div className="flex items-center gap-2">
-          <GravKtrlLogo size="sm" />
-          <div>
-            <div className="font-extrabold text-xs tracking-wider text-white">GRAVKTRL</div>
-            <div className="text-[9px] text-cyan-400 font-mono tracking-tighter uppercase -mt-0.5">
-              AGENT BRIDGE
+            {/* Right Actions: Workspace Chip & Quick Connect / Posture */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setActiveTab("git")}
+                className="h-8 px-2.5 bg-white shadow-neo-soft rounded-full flex items-center gap-1 text-slate-600 hover:text-indigo-600 transition-all active:shadow-neo-pressed border border-white/60"
+                title="Active Project Workspace"
+              >
+                <span className="material-symbols-outlined text-indigo-500 text-[15px]">swap_horiz</span>
+                <span className="font-mono text-[11px] font-semibold text-slate-700 truncate max-w-[100px]">
+                  {getWorkspaceShortName(activeWorkspace)}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setShowOnboarding(true)}
+                className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-600 to-indigo-500 text-white shadow-neo-soft flex items-center justify-center hover:brightness-105 active:scale-95 transition-all"
+                title="Pairing & Onboarding Guide"
+              >
+                <span className="material-symbols-outlined text-[17px]">hub</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Metrics Strip */}
+          <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 no-scrollbar">
+            {/* Status & Latency */}
+            <div
+              className={`h-6 px-2.5 rounded-full flex items-center gap-1.5 shrink-0 shadow-sm border ${
+                connectionState === "authenticated"
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-200/60"
+                  : "bg-rose-50 text-rose-700 border-rose-200/60"
+              }`}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  connectionState === "authenticated" ? "bg-emerald-500 animate-pulse" : "bg-rose-500"
+                }`}
+              ></span>
+              <span className="font-mono text-[10px] font-bold tracking-tight">
+                {connectionState === "authenticated" ? `ONLINE • ${latencyMs ?? 8}ms` : "OFFLINE"}
+              </span>
+            </div>
+
+            {/* CPU */}
+            <div className="h-6 px-2.5 rounded-full bg-white shadow-neo-soft flex items-center gap-1 shrink-0 border border-white/60">
+              <span className="text-[10px] font-medium text-slate-400">CPU</span>
+              <span className="font-mono text-[11px] text-indigo-600 font-semibold">
+                {telemetry?.cpuUsagePercent ?? 18}%
+              </span>
+            </div>
+
+            {/* RAM */}
+            <div className="h-6 px-2.5 rounded-full bg-white shadow-neo-soft flex items-center gap-1 shrink-0 border border-white/60">
+              <span className="text-[10px] font-medium text-slate-400">RAM</span>
+              <span className="font-mono text-[11px] text-slate-700 font-semibold">
+                {ramUsedGb}/{ramTotalGb}GB
+              </span>
+            </div>
+
+            {/* Antigravity Mode */}
+            <div className="h-6 px-2.5 rounded-full bg-white shadow-neo-soft flex items-center gap-1 shrink-0 border border-white/60">
+              <span className="text-[10px] font-medium text-slate-400">ANTIGRAVITY</span>
+              <span
+                className={`font-mono text-[10px] font-bold ${
+                  telemetry?.cdpHealthy ? "text-emerald-600" : "text-indigo-600"
+                }`}
+              >
+                {telemetry?.cdpHealthy ? "CDP:9222" : "WIN32"}
+              </span>
+            </div>
+
+            {/* Posture Pill */}
+            <div className="relative shrink-0">
+              <button
+                onClick={() => setShowPostureMenu(!showPostureMenu)}
+                className="h-6 px-2.5 rounded-full bg-white shadow-neo-soft flex items-center gap-1 text-slate-600 border border-white/60 hover:text-indigo-600"
+              >
+                <Smartphone className="w-2.5 h-2.5 text-indigo-500" />
+                <span className="font-mono text-[10px] text-indigo-600 font-bold capitalize">
+                  {manualOverride ? `${posture}*` : posture}
+                </span>
+                <ChevronDown className="w-2.5 h-2.5 text-slate-400" />
+              </button>
+
+              {showPostureMenu && (
+                <div className="absolute right-0 top-full mt-1.5 w-48 bg-white border border-slate-200 rounded-2xl shadow-neo-flat p-1.5 z-50 text-[11px]">
+                  <div className="px-2 py-1 text-[9px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                    Device Posture Override
+                  </div>
+                  {[
+                    { id: null, label: "⚡ Auto-Detect (Sensors)" },
+                    { id: "phone-slab", label: "📱 Phone Slab" },
+                    { id: "flip-flex", label: "📐 Z Flip Flex (Tabletop)" },
+                    { id: "fold-dual", label: "📖 Galaxy Fold Dual" },
+                    { id: "cover-compact", label: "🔍 Cover Screen (<360px)" },
+                    { id: "desktop-mission", label: "🖥️ Desktop Mission" },
+                  ].map((item) => (
+                    <button
+                      key={String(item.id)}
+                      onClick={() => {
+                        setManualOverride(item.id as DevicePosture | null);
+                        setShowPostureMenu(false);
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-xl transition-all flex items-center justify-between ${
+                        manualOverride === item.id || (!manualOverride && item.id === null)
+                          ? "bg-indigo-50 text-indigo-700 font-bold"
+                          : "text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      <span>{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
-
-        {/* Center / Right Action Controls */}
-        <div className="flex items-center gap-1.5 overflow-hidden">
-          {/* Posture Switcher Pill */}
-          <div className="relative">
-            <button
-              onClick={() => setShowPostureMenu(!showPostureMenu)}
-              className="px-2 py-0.5 rounded-full bg-[#161b22] hover:bg-[#21262d] border border-[#30363d] text-[10px] font-mono text-cyan-300 flex items-center gap-1 transition-colors"
-              title="Change UI Posture Mode"
-            >
-              <Smartphone className="w-2.5 h-2.5 text-cyan-400" />
-              <span className="capitalize">{manualOverride ? `${posture}*` : posture}</span>
-              <ChevronDown className="w-2.5 h-2.5 text-slate-400" />
-            </button>
-
-            {/* Posture Menu Dropdown */}
-            {showPostureMenu && (
-              <div className="absolute right-0 top-full mt-1.5 w-44 bg-[#161b22] border border-[#30363d] rounded-xl shadow-2xl p-1 z-50 text-[11px] animate-in fade-in">
-                <div className="px-2 py-1 text-[9px] font-bold text-slate-500 uppercase tracking-wider border-b border-[#21262d]">
-                  Device Posture Override
-                </div>
-                {[
-                  { id: null, label: "⚡ Auto-Detect (Sensors)" },
-                  { id: "phone-slab", label: "📱 Phone Slab" },
-                  { id: "flip-flex", label: "📐 Z Flip Flex (Tabletop)" },
-                  { id: "fold-dual", label: "📖 Galaxy Fold Dual" },
-                  { id: "cover-compact", label: "🔍 Cover Screen (<360px)" },
-                  { id: "desktop-mission", label: "🖥️ Desktop Mission" },
-                ].map((item) => (
-                  <button
-                    key={String(item.id)}
-                    onClick={() => {
-                      setManualOverride(item.id as DevicePosture | null);
-                      setShowPostureMenu(false);
-                    }}
-                    className={`w-full text-left px-2 py-1.5 rounded-lg transition-colors flex items-center justify-between ${
-                      (manualOverride === item.id || (!manualOverride && item.id === null))
-                        ? "bg-cyan-950 text-cyan-300 font-semibold"
-                        : "text-slate-300 hover:bg-[#21262d]"
-                    }`}
-                  >
-                    <span>{item.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Quick Connect / Guide Pill */}
-          <button
-            onClick={() => setShowOnboarding(true)}
-            className="px-2 py-0.5 rounded-full bg-gradient-to-r from-purple-950 to-cyan-950 hover:from-purple-900 hover:to-cyan-900 border border-cyan-500/50 text-[10px] font-semibold text-cyan-200 flex items-center gap-1 shadow-sm transition-all active:scale-95"
-            title="Open Onboarding & Quick Pair Guide"
-          >
-            <Zap className="w-2.5 h-2.5 text-cyan-400 animate-pulse" />
-            <span className="hidden min-[340px]:inline">Connect</span>
-          </button>
-
-          {/* Online / Offline Status Badge */}
-          <button
-            onClick={() => setActiveTab("host")}
-            className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold flex items-center gap-1 transition-all ${
-              connectionState === "authenticated"
-                ? "bg-emerald-950/70 border border-emerald-800 text-emerald-300"
-                : connectionState === "connecting"
-                ? "bg-amber-950/70 border border-amber-800 text-amber-300 animate-pulse"
-                : "bg-rose-950/70 border border-rose-800 text-rose-300"
-            }`}
-          >
-            {connectionState === "authenticated" ? (
-              <>
-                <Wifi className="w-2.5 h-2.5 text-emerald-400" />
-                <span>{latencyMs ? `${latencyMs}ms` : "ONLINE"}</span>
-              </>
-            ) : (
-              <>
-                <WifiOff className="w-2.5 h-2.5 text-rose-400" />
-                <span>OFFLINE</span>
-              </>
-            )}
-          </button>
-        </div>
       </header>
 
-      {/* ADAPTIVE VIEWPORT ENGINE: 5 FORM FACTORS */}
-      <div className="flex-1 min-h-0 overflow-hidden relative">
-        {/* POSTURE 1 & 2: PHONE SLAB & COVER COMPACT (Single-column + Tab Dock) */}
+      {/* 2. MAIN ADAPTIVE CONTENT VIEWPORT */}
+      <main className="flex-1 min-h-0 pt-28 pb-16 overflow-y-auto w-full relative">
+        {/* POSTURE 1 & 2: PHONE SLAB & COVER COMPACT */}
         {(posture === "phone-slab" || posture === "cover-compact") && (
-          <div className="flex flex-col h-full w-full max-w-lg mx-auto overflow-hidden">
-            <div className="flex-1 min-h-0 overflow-hidden relative">
+          <div className="h-full w-full max-w-lg mx-auto overflow-y-auto">
+            {activeTab === "agent" && (
+              <AgentConsoleView client={client} activeWorkspace={activeWorkspace} />
+            )}
+            {activeTab === "terminal" && (
+              <TerminalDeckView client={client} activeWorkspace={activeWorkspace} />
+            )}
+            {activeTab === "git" && (
+              <GitWorkspaceView
+                client={client}
+                activeWorkspace={activeWorkspace}
+                onWorkspaceSwitched={(newWs) => {
+                  setActiveWorkspace(newWs);
+                  fetchTelemetryAndWorkspace();
+                }}
+              />
+            )}
+            {activeTab === "host" && (
+              <HostPairingView
+                client={client}
+                connectionState={connectionState}
+                latencyMs={latencyMs}
+                telemetry={telemetry}
+                onRefreshTelemetry={fetchTelemetryAndWorkspace}
+                activeWorkspace={activeWorkspace}
+                onOpenOnboarding={() => setShowOnboarding(true)}
+              />
+            )}
+          </div>
+        )}
+
+        {/* POSTURE 3: FLIP FLEX (Tabletop Clamshell Split) */}
+        {posture === "flip-flex" && (
+          <div className="flex flex-col h-full w-full">
+            {/* Top Display */}
+            <div className="h-[48%] overflow-hidden relative border-b border-slate-200 bg-white shadow-neo-soft">
               {activeTab === "agent" && (
                 <AgentConsoleView client={client} activeWorkspace={activeWorkspace} />
-              )}
-              {activeTab === "terminal" && (
-                <TerminalDeckView client={client} activeWorkspace={activeWorkspace} />
-              )}
-              {activeTab === "git" && (
-                <GitWorkspaceView
-                  client={client}
-                  activeWorkspace={activeWorkspace}
-                  onWorkspaceSwitched={(newWs) => {
-                    setActiveWorkspace(newWs);
-                    fetchTelemetryAndWorkspace();
-                  }}
-                />
               )}
               {activeTab === "host" && (
                 <HostPairingView
@@ -322,76 +381,20 @@ export default function GravKtrlApp() {
                   latencyMs={latencyMs}
                   telemetry={telemetry}
                   onRefreshTelemetry={fetchTelemetryAndWorkspace}
+                  activeWorkspace={activeWorkspace}
+                  onOpenOnboarding={() => setShowOnboarding(true)}
                 />
+              )}
+              {activeTab !== "agent" && activeTab !== "host" && (
+                <AgentConsoleView client={client} activeWorkspace={activeWorkspace} />
               )}
             </div>
 
-            {/* 4-Tab Bottom Navigation Dock (Safe-area inset aware) */}
-            <nav className="flex items-center justify-around px-2 pt-1.5 pb-[max(env(safe-area-inset-bottom,0px),10px)] bg-[#0d1117] border-t border-[#21262d] shrink-0 z-30 shadow-2xl">
-              <button
-                onClick={() => setActiveTab("agent")}
-                className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
-                  activeTab === "agent"
-                    ? "text-cyan-400 bg-cyan-950/50 border border-cyan-800/60 shadow-sm"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <Bot className="w-4 h-4" />
-                <span className="text-[10px] font-semibold tracking-tight">Agent</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab("terminal")}
-                className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
-                  activeTab === "terminal"
-                    ? "text-emerald-400 bg-emerald-950/50 border border-emerald-800/60 shadow-sm"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <Terminal className="w-4 h-4" />
-                <span className="text-[10px] font-semibold tracking-tight">Terminal</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab("git")}
-                className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
-                  activeTab === "git"
-                    ? "text-amber-400 bg-amber-950/50 border border-amber-800/60 shadow-sm"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <GitBranch className="w-4 h-4" />
-                <span className="text-[10px] font-semibold tracking-tight">Git & Files</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab("host")}
-                className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
-                  activeTab === "host"
-                    ? "text-cyan-400 bg-cyan-950/50 border border-cyan-800/60 shadow-sm"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <Settings className="w-4 h-4" />
-                <span className="text-[10px] font-semibold tracking-tight">Host PC</span>
-              </button>
-            </nav>
-          </div>
-        )}
-
-        {/* POSTURE 3: FLIP FLEX (Clamshell 90° Tabletop Split across Fold Crease) */}
-        {posture === "flip-flex" && (
-          <div className="flex flex-col h-full w-full">
-            {/* TOP 50%: Live Monitor Above Hinge Crease */}
-            <div className="h-[48%] overflow-hidden relative border-b border-[#21262d] bg-[#050608]">
-              <AgentConsoleView client={client} activeWorkspace={activeWorkspace} />
-            </div>
-
-            {/* MIDDLE 28px HINGE SAFE BAR (Along the Physical Fold Crease) */}
-            <div className="h-7 bg-[#161b22] border-y border-cyan-500/40 flex items-center justify-between px-3 text-[10px] font-mono text-cyan-300 shrink-0 select-none">
-              <div className="flex items-center gap-2">
-                <SplitSquareVertical className="w-3.5 h-3.5 text-cyan-400" />
-                <span>FLIP TABLETOP FLEX MODE</span>
+            {/* Hinge Safe Bar */}
+            <div className="h-7 bg-[#eef2f7] border-y border-indigo-200/60 flex items-center justify-between px-3 text-[10px] font-mono text-indigo-700 shrink-0">
+              <div className="flex items-center gap-1.5">
+                <SplitSquareVertical className="w-3.5 h-3.5 text-indigo-600" />
+                <span className="font-bold">FLIP TABLETOP FLEX MODE</span>
               </div>
               <div className="flex items-center gap-2">
                 <span>{getWorkspaceShortName(activeWorkspace)}</span>
@@ -400,68 +403,64 @@ export default function GravKtrlApp() {
               </div>
             </div>
 
-            {/* BOTTOM 50%: Tactile Control Pad (Flat on Table) */}
-            <div className="flex-1 overflow-y-auto p-2.5 bg-[#090b10] flex flex-col justify-between space-y-2">
-              {/* 2x3 1-Tap Quick Action Macro Grid */}
-              <div className="grid grid-cols-3 gap-1.5 shrink-0">
+            {/* Bottom Tactile Pad */}
+            <div className="flex-1 overflow-y-auto p-3 bg-[#f6f8fb] flex flex-col justify-between space-y-2">
+              <div className="grid grid-cols-3 gap-2">
                 <button
                   onClick={() => handleFlipExecuteMacro("npm run typecheck")}
-                  className="p-2 rounded-xl bg-[#161b22] hover:bg-[#21262d] border border-cyan-800 text-cyan-300 text-[10px] font-mono flex items-center justify-center gap-1 active:scale-95"
+                  className="p-2.5 rounded-xl bg-white shadow-neo-soft text-slate-700 text-[10px] font-mono flex items-center justify-center gap-1 active:shadow-neo-pressed"
                 >
-                  <Play className="w-2.5 h-2.5 fill-current" />
+                  <Play className="w-2.5 h-2.5 fill-current text-indigo-600" />
                   Typecheck
                 </button>
                 <button
                   onClick={() => handleFlipExecuteMacro("npm test")}
-                  className="p-2 rounded-xl bg-[#161b22] hover:bg-[#21262d] border border-emerald-800 text-emerald-300 text-[10px] font-mono flex items-center justify-center gap-1 active:scale-95"
+                  className="p-2.5 rounded-xl bg-white shadow-neo-soft text-slate-700 text-[10px] font-mono flex items-center justify-center gap-1 active:shadow-neo-pressed"
                 >
-                  <Play className="w-2.5 h-2.5 fill-current" />
+                  <Play className="w-2.5 h-2.5 fill-current text-emerald-600" />
                   Test
                 </button>
                 <button
-                  onClick={() => handleFlipExecuteMacro("gradlew assembleRelease")}
-                  className="p-2 rounded-xl bg-[#161b22] hover:bg-[#21262d] border border-purple-800 text-purple-300 text-[10px] font-mono flex items-center justify-center gap-1 active:scale-95"
+                  onClick={() => handleFlipExecuteMacro("cd android && gradlew assembleDebug")}
+                  className="p-2.5 rounded-xl bg-white shadow-neo-soft text-slate-700 text-[10px] font-mono flex items-center justify-center gap-1 active:shadow-neo-pressed"
                 >
-                  <Play className="w-2.5 h-2.5 fill-current" />
+                  <Play className="w-2.5 h-2.5 fill-current text-purple-600" />
                   Build APK
                 </button>
                 <button
-                  onClick={() => handleFlipExecuteMacro("adb devices")}
-                  className="p-2 rounded-xl bg-[#161b22] hover:bg-[#21262d] border border-amber-800 text-amber-300 text-[10px] font-mono flex items-center justify-center gap-1 active:scale-95"
-                >
-                  <Play className="w-2.5 h-2.5 fill-current" />
-                  ADB Devices
-                </button>
-                <button
                   onClick={() => handleFlipExecuteMacro("git status")}
-                  className="p-2 rounded-xl bg-[#161b22] hover:bg-[#21262d] border border-slate-700 text-slate-300 text-[10px] font-mono flex items-center justify-center gap-1 active:scale-95"
+                  className="p-2.5 rounded-xl bg-white shadow-neo-soft text-slate-700 text-[10px] font-mono flex items-center justify-center gap-1 active:shadow-neo-pressed"
                 >
-                  <GitBranch className="w-2.5 h-2.5" />
                   Git Status
                 </button>
                 <button
                   onClick={() => client.stopAgent()}
-                  className="p-2 rounded-xl bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-300 text-[10px] font-mono flex items-center justify-center gap-1 active:scale-95"
+                  className="p-2.5 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-mono flex items-center justify-center gap-1 active:shadow-neo-pressed"
                 >
                   <Square className="w-2.5 h-2.5 fill-current" />
                   Stop Agent
                 </button>
+                <button
+                  onClick={() => setActiveTab("host")}
+                  className="p-2.5 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-mono flex items-center justify-center gap-1 active:shadow-neo-pressed"
+                >
+                  Host HUD
+                </button>
               </div>
 
-              {/* Tactical Prompt Bar */}
               <div className="flex items-center gap-1.5 pt-1">
                 <input
                   type="text"
                   value={flipPrompt}
                   onChange={(e) => setFlipPrompt(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleFlipSend()}
-                  placeholder="Inject prompt into Antigravity IDE..."
-                  className="flex-1 bg-[#161b22] border border-[#30363d] focus:border-cyan-500 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none font-sans"
+                  placeholder="Inject prompt into Antigravity..."
+                  className="flex-1 neo-well rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none"
                 />
                 <button
                   onClick={() => handleFlipSend()}
                   disabled={!flipPrompt.trim()}
-                  className="p-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white shadow active:scale-95"
+                  className="p-2.5 rounded-xl bg-indigo-600 text-white shadow-neo-soft active:scale-95 disabled:opacity-40"
                 >
                   <Send className="w-4 h-4" />
                 </button>
@@ -470,47 +469,43 @@ export default function GravKtrlApp() {
           </div>
         )}
 
-        {/* POSTURE 4: FOLD DUAL (Galaxy Z Fold 8 & iPhone Duo Dual-Screen Split) */}
+        {/* POSTURE 4: FOLD DUAL */}
         {posture === "fold-dual" && (
           <div className="flex h-full w-full">
-            {/* LEFT DISPLAY SEGMENT: Agent Chat Console */}
-            <div className="flex-1 min-w-0 h-full overflow-hidden border-r border-[#21262d]">
+            <div className="flex-1 min-w-0 h-full overflow-hidden border-r border-slate-200 bg-white">
               <AgentConsoleView client={client} activeWorkspace={activeWorkspace} />
             </div>
 
-            {/* CENTER HINGE GUTTER: Dedicated Fold Crease Safe Buffer */}
             <div
               style={{ width: `${hingeWidthPx}px` }}
-              className="bg-[#090b10] border-x border-[#21262d] flex flex-col items-center justify-center shrink-0 text-slate-600 select-none"
-              title="Physical Hinge Crease Buffer"
+              className="bg-[#eef2f7] border-x border-slate-200 flex flex-col items-center justify-center shrink-0 select-none"
             >
-              <div className="w-1.5 h-16 rounded-full bg-slate-800/80 my-auto" />
+              <div className="w-1.5 h-16 rounded-full bg-slate-300 my-auto" />
             </div>
 
-            {/* RIGHT DISPLAY SEGMENT: Terminal Engine (Top) + Git Diff (Bottom) */}
             <div className="flex-1 min-w-0 h-full flex flex-col overflow-hidden">
-              <div className="flex-1 min-h-0 border-b border-[#21262d]">
+              <div className="flex-1 min-h-0 border-b border-slate-200">
                 <TerminalDeckView client={client} activeWorkspace={activeWorkspace} />
               </div>
               <div className="h-[46%] min-h-0">
-                <GitWorkspaceView
+                <HostPairingView
                   client={client}
+                  connectionState={connectionState}
+                  latencyMs={latencyMs}
+                  telemetry={telemetry}
+                  onRefreshTelemetry={fetchTelemetryAndWorkspace}
                   activeWorkspace={activeWorkspace}
-                  onWorkspaceSwitched={(newWs) => {
-                    setActiveWorkspace(newWs);
-                    fetchTelemetryAndWorkspace();
-                  }}
+                  onOpenOnboarding={() => setShowOnboarding(true)}
                 />
               </div>
             </div>
           </div>
         )}
 
-        {/* POSTURE 5: DESKTOP MISSION (1024px+ 3-Column Command Center) */}
+        {/* POSTURE 5: DESKTOP MISSION (1024px+ 3-Column) */}
         {posture === "desktop-mission" && (
           <div className="grid grid-cols-12 h-full w-full">
-            {/* Left Column (3 cols): Workspaces & Git */}
-            <div className="col-span-3 h-full border-r border-[#21262d] overflow-hidden">
+            <div className="col-span-3 h-full border-r border-slate-200 overflow-hidden bg-white">
               <GitWorkspaceView
                 client={client}
                 activeWorkspace={activeWorkspace}
@@ -520,30 +515,113 @@ export default function GravKtrlApp() {
                 }}
               />
             </div>
-
-            {/* Center Column (5 cols): Antigravity Agent Chat */}
-            <div className="col-span-5 h-full border-r border-[#21262d] overflow-hidden">
+            <div className="col-span-5 h-full border-r border-slate-200 overflow-hidden bg-[#f6f8fb]">
               <AgentConsoleView client={client} activeWorkspace={activeWorkspace} />
             </div>
-
-            {/* Right Column (4 cols): Terminal Deck & Host Pairing */}
-            <div className="col-span-4 h-full flex flex-col overflow-hidden">
-              <div className="flex-1 min-h-0 border-b border-[#21262d]">
+            <div className="col-span-4 h-full flex flex-col overflow-hidden bg-white">
+              <div className="flex-1 min-h-0 border-b border-slate-200">
                 <TerminalDeckView client={client} activeWorkspace={activeWorkspace} />
               </div>
-              <div className="h-[40%] min-h-0">
+              <div className="h-[40%] min-h-0 overflow-y-auto">
                 <HostPairingView
                   client={client}
                   connectionState={connectionState}
                   latencyMs={latencyMs}
                   telemetry={telemetry}
                   onRefreshTelemetry={fetchTelemetryAndWorkspace}
+                  activeWorkspace={activeWorkspace}
+                  onOpenOnboarding={() => setShowOnboarding(true)}
                 />
               </div>
             </div>
           </div>
         )}
-      </div>
-    </main>
+      </main>
+
+      {/* 3. SILK NEOMORPHIC BOTTOM NAVIGATION DOCK (Stitch Design System) */}
+      <nav className="fixed bottom-0 w-full z-50 pb-safe bg-[#f6f8fb]/90 backdrop-blur-xl border-t border-slate-200/60 shadow-[0_-4px_16px_rgba(166,178,199,0.25)]">
+        <div className="h-16 px-4 flex items-center justify-around">
+          {/* Agent Tab */}
+          <button
+            onClick={() => setActiveTab("agent")}
+            className={`flex flex-col items-center justify-center gap-0.5 min-w-[56px] min-h-[44px] h-full transition-all ${
+              activeTab === "agent" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
+            }`}
+          >
+            {activeTab === "agent" ? (
+              <div className="w-10 h-7 rounded-full bg-indigo-50 shadow-neo-soft flex items-center justify-center text-indigo-600">
+                <span className="material-symbols-outlined text-[19px]">smart_toy</span>
+              </div>
+            ) : (
+              <span className="material-symbols-outlined text-[20px]">smart_toy</span>
+            )}
+            <span className="text-[11px] tracking-tight">Agent</span>
+          </button>
+
+          {/* Terminal Tab */}
+          <button
+            onClick={() => setActiveTab("terminal")}
+            className={`flex flex-col items-center justify-center gap-0.5 min-w-[56px] min-h-[44px] h-full transition-all ${
+              activeTab === "terminal" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
+            }`}
+          >
+            {activeTab === "terminal" ? (
+              <div className="w-10 h-7 rounded-full bg-indigo-50 shadow-neo-soft flex items-center justify-center text-indigo-600">
+                <span className="material-symbols-outlined text-[19px]">terminal</span>
+              </div>
+            ) : (
+              <span className="material-symbols-outlined text-[20px]">terminal</span>
+            )}
+            <span className="text-[11px] tracking-tight">Terminal</span>
+          </button>
+
+          {/* Git/Files Tab */}
+          <button
+            onClick={() => setActiveTab("git")}
+            className={`flex flex-col items-center justify-center gap-0.5 min-w-[56px] min-h-[44px] h-full transition-all ${
+              activeTab === "git" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
+            }`}
+          >
+            {activeTab === "git" ? (
+              <div className="w-10 h-7 rounded-full bg-indigo-50 shadow-neo-soft flex items-center justify-center text-indigo-600">
+                <span className="material-symbols-outlined text-[19px]">account_tree</span>
+              </div>
+            ) : (
+              <span className="material-symbols-outlined text-[20px]">account_tree</span>
+            )}
+            <span className="text-[11px] tracking-tight">Git/Files</span>
+          </button>
+
+          {/* Host PC Tab */}
+          <button
+            onClick={() => setActiveTab("host")}
+            className={`flex flex-col items-center justify-center gap-0.5 min-w-[56px] min-h-[44px] h-full transition-all ${
+              activeTab === "host" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
+            }`}
+          >
+            {activeTab === "host" ? (
+              <div className="w-10 h-7 rounded-full bg-indigo-50 shadow-neo-soft flex items-center justify-center text-indigo-600">
+                <span className="material-symbols-outlined text-[19px]">dns</span>
+              </div>
+            ) : (
+              <span className="material-symbols-outlined text-[20px]">dns</span>
+            )}
+            <span className="text-[11px] tracking-tight">Host PC</span>
+          </button>
+        </div>
+      </nav>
+
+      {/* 4. ONBOARDING MODAL */}
+      {showOnboarding && (
+        <OnboardingConnectModal
+          client={client}
+          onClose={() => setShowOnboarding(false)}
+          onConnected={() => {
+            setShowOnboarding(false);
+            fetchTelemetryAndWorkspace();
+          }}
+        />
+      )}
+    </div>
   );
 }
