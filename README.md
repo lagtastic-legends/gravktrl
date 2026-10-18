@@ -70,16 +70,25 @@ Built for the newest generation of smartphones, flips, and foldables:
 
 ---
 
-## 🚀 Quick Start Guide
+### Step 1: Windows Desktop 1-Click Setup (Zero-CLI)
+You don't need to use the terminal every time! Run the automated shortcut installer once:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup-windows-shortcuts.ps1
+```
+This automatically:
+1. **Configures the Antigravity Windows App** in your Start Menu and Desktop to always launch with `--remote-debugging-port=9222` enabled.
+2. **Creates a 1-Click Desktop Icon** for `GravKtrl PC Host`.
 
-### Step 1: Start the PC Host Daemon
-In PowerShell on your Windows PC:
+*Manual Alternative:* Right-click your existing Antigravity shortcut on Windows ➔ **Properties** ➔ In the **Target** field, append ` --remote-debugging-port=9222` at the end ➔ Click **Apply**.
+
+### Step 2: Start the PC Host Daemon
+Double-click the **GravKtrl PC Host** icon on your Windows desktop (or run in PowerShell):
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\start-gravktrl-pc.ps1
 ```
 The terminal displays your LAN IP, Tailscale IP, ephemeral 6-digit PIN, and an ASCII QR code.
 
-### Step 2: Install Mobile App on Android
+### Step 3: Install Mobile App on Android
 - **From GitHub Releases:** Download `app-debug.apk` directly from the [Releases](https://github.com/lagtastic-legends/gravktrl/releases) tab.
 - **From Local PC Network:** When the daemon is running, open a browser on your phone and go to:
   ```
