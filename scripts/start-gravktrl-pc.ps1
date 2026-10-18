@@ -33,8 +33,8 @@ if (-not $cdpActive) {
     Write-Host "         GravKtrl will automatically operate in FALLBACK QUEUE mode:" -ForegroundColor Yellow
     Write-Host "          • Prompts will be staged directly into the Windows Clipboard" -ForegroundColor DarkGray
     Write-Host "          • Prompts will be logged to <workspace>/.antigravity/GRAVKTRL_INBOX.md" -ForegroundColor DarkGray
-    Write-Host "         To enable full direct DOM injection & live streaming, start Antigravity with:" -ForegroundColor White
-    Write-Host "           antigravity.exe --remote-debugging-port=9222" -ForegroundColor Cyan
+    Write-Host "         To enable direct DOM injection & live streaming, run:" -ForegroundColor White
+    Write-Host "           .\scripts\launch-antigravity-cdp.ps1" -ForegroundColor Cyan
     Write-Host ""
 }
 

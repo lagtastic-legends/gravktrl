@@ -307,18 +307,18 @@ export const TerminalDeckView: React.FC<TerminalDeckViewProps> = ({ client, acti
       )}
 
       {/* Terminal Command Input */}
-      <div className="p-2.5 bg-[#0d1117] border-t border-[#21262d]">
+      <div className="shrink-0 px-3 py-2 bg-[#0d1117] border-t border-[#21262d] z-10">
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => navigateHistory("up")}
-            className="p-2 rounded-lg bg-[#161b22] border border-[#30363d] text-slate-400 hover:text-white"
+            className="w-9 h-9 rounded-lg bg-[#161b22] border border-[#30363d] text-slate-400 hover:text-white flex items-center justify-center shrink-0 active:scale-95"
             title="Previous command"
           >
             <ArrowUp className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => navigateHistory("down")}
-            className="p-2 rounded-lg bg-[#161b22] border border-[#30363d] text-slate-400 hover:text-white"
+            className="w-9 h-9 rounded-lg bg-[#161b22] border border-[#30363d] text-slate-400 hover:text-white flex items-center justify-center shrink-0 active:scale-95"
             title="Next command"
           >
             <ArrowDown className="w-3.5 h-3.5" />
@@ -334,17 +334,17 @@ export const TerminalDeckView: React.FC<TerminalDeckViewProps> = ({ client, acti
               }
             }}
             placeholder="powershell command..."
-            className="flex-1 bg-[#161b22] border border-[#30363d] focus:border-emerald-500 rounded-xl px-3 py-2 text-xs font-mono text-white placeholder-slate-500 focus:outline-none"
+            className="flex-1 min-w-0 h-9 bg-[#161b22] border border-[#30363d] focus:border-emerald-500 rounded-xl px-3 text-xs font-mono text-white placeholder-slate-500 focus:outline-none"
           />
 
           <button
             type="button"
             onClick={() => handleExecute()}
             disabled={!command.trim() || activeExecutionId !== null}
-            className="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-medium shadow transition-all active:scale-95"
+            className="w-9 h-9 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white flex items-center justify-center shrink-0 font-medium shadow transition-all active:scale-95"
             title="Execute"
           >
-            <Play className="w-4 h-4 fill-current" />
+            <Play className="w-3.5 h-3.5 fill-current" />
           </button>
         </div>
       </div>

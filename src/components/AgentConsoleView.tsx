@@ -264,12 +264,12 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
       </div>
 
       {/* Input Bar */}
-      <div className="p-2.5 bg-[#0d1117] border-t border-[#21262d]">
-        <div className="flex items-end gap-1.5">
+      <div className="shrink-0 px-3 py-2 bg-[#0d1117] border-t border-[#21262d] z-10">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={toggleVoice}
-            className={`p-2.5 rounded-xl border transition-all ${
+            className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 transition-all ${
               isListening
                 ? "bg-rose-900 border-rose-500 text-rose-100 animate-pulse glow-rose"
                 : "bg-[#161b22] border-[#30363d] text-slate-300 hover:text-white"
@@ -279,9 +279,9 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
             {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
           </button>
 
-          <div className="flex-1 relative">
+          <div className="flex-1 min-w-0 relative">
             <textarea
-              rows={2}
+              rows={1}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={(e) => {
@@ -291,7 +291,7 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
                 }
               }}
               placeholder="Ask Antigravity agent on PC..."
-              className="w-full bg-[#161b22] border border-[#30363d] focus:border-cyan-500 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none resize-none font-sans"
+              className="w-full min-h-[40px] max-h-24 bg-[#161b22] border border-[#30363d] focus:border-cyan-500 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none resize-none font-sans"
             />
           </div>
 
@@ -299,7 +299,7 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
             type="button"
             onClick={() => handleSend()}
             disabled={!prompt.trim() || isSending}
-            className="p-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white font-medium shadow transition-all active:scale-95"
+            className="w-10 h-10 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white flex items-center justify-center shrink-0 font-medium shadow transition-all active:scale-95"
             title="Inject Prompt"
           >
             <Send className="w-4 h-4" />

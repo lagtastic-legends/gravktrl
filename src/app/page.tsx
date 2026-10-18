@@ -186,7 +186,7 @@ export default function GravKtrlApp() {
   };
 
   return (
-    <main className="flex flex-col h-[100dvh] w-full bg-[#08090d] text-slate-100 overflow-hidden relative select-none">
+    <main className="flex flex-col h-full w-full bg-[#08090d] text-slate-100 overflow-hidden relative select-none">
       {/* Onboarding Wizard Modal */}
       <OnboardingConnectModal
         isOpen={showOnboarding}
@@ -197,8 +197,8 @@ export default function GravKtrlApp() {
         onConnected={() => fetchTelemetryAndWorkspace()}
       />
 
-      {/* COMPACT TOP BAR (Zero clipping on 360px & Cover screens) */}
-      <header className="flex items-center justify-between px-3 py-2 bg-[#0d1117] border-b border-[#21262d] shrink-0 z-30">
+      {/* COMPACT TOP BAR (Safe-area aware) */}
+      <header className="flex items-center justify-between px-3 pt-[max(env(safe-area-inset-top,0px),8px)] pb-2 bg-[#0d1117] border-b border-[#21262d] shrink-0 z-30">
         {/* Brand Logo & Name */}
         <div className="flex items-center gap-2">
           <GravKtrlLogo size="sm" />
@@ -294,11 +294,11 @@ export default function GravKtrlApp() {
       </header>
 
       {/* ADAPTIVE VIEWPORT ENGINE: 5 FORM FACTORS */}
-      <div className="flex-1 overflow-hidden relative">
+      <div className="flex-1 min-h-0 overflow-hidden relative">
         {/* POSTURE 1 & 2: PHONE SLAB & COVER COMPACT (Single-column + Tab Dock) */}
         {(posture === "phone-slab" || posture === "cover-compact") && (
-          <div className="flex flex-col h-full w-full max-w-lg mx-auto">
-            <div className="flex-1 overflow-hidden relative">
+          <div className="flex flex-col h-full w-full max-w-lg mx-auto overflow-hidden">
+            <div className="flex-1 min-h-0 overflow-hidden relative">
               {activeTab === "agent" && (
                 <AgentConsoleView client={client} activeWorkspace={activeWorkspace} />
               )}
@@ -326,8 +326,8 @@ export default function GravKtrlApp() {
               )}
             </div>
 
-            {/* 4-Tab Bottom Navigation Dock */}
-            <nav className="flex items-center justify-around px-2 py-2 bg-[#0d1117] border-t border-[#21262d] shrink-0 z-20">
+            {/* 4-Tab Bottom Navigation Dock (Safe-area inset aware) */}
+            <nav className="flex items-center justify-around px-2 pt-1.5 pb-[max(env(safe-area-inset-bottom,0px),10px)] bg-[#0d1117] border-t border-[#21262d] shrink-0 z-30 shadow-2xl">
               <button
                 onClick={() => setActiveTab("agent")}
                 className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
