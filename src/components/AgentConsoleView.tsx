@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { Mic, MicOff, Send, Square, Sparkles, Terminal, ShieldAlert, CheckCircle2, Copy, RefreshCw } from "lucide-react";
+import { Mic, MicOff, Send, Square, Sparkles, Terminal, ShieldAlert, CheckCircle2, Copy, RefreshCw, Activity, FileText } from "lucide-react";
 import type { GravKtrlClient } from "../lib/gravktrl-client";
 
 interface AgentConsoleViewProps {
@@ -17,6 +17,13 @@ interface MessageHistory {
   timestamp: string;
 }
 
+interface FileActivity {
+  file: string;
+  action: "created" | "modified" | "deleted";
+  size?: number;
+  timestamp: string;
+}
+
 const PRESET_PROMPTS = [
   { label: "Typecheck & Fix", prompt: "Run npm run typecheck, inspect any errors found, and fix them with zero regressions." },
   { label: "Run Test Suite", prompt: "Run the project test suite, diagnose any failing tests, and fix them cleanly." },
@@ -28,11 +35,14 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
   const [prompt, setPrompt] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [agentStatus, setAgentStatus] = useState<string>("idle");
+  const [attachMode, setAttachMode] = useState<"cdp" | "win32" | "fallback">("cdp");
+  const [showActivity, setShowActivity] = useState<boolean>(false);
+  const [recentFiles, setRecentFiles] = useState<FileActivity[]>([]);
   const [messages, setMessages] = useState<MessageHistory[]>([
     {
       id: "initial",
       sender: "agent",
-      text: "⚡ **GravKtrl Agent Bridge Connected.**\n\nDirectly inject prompts into Gemini 3.8 Flash inside Google Antigravity on your PC. Live thoughts and actions will stream here.",
+      text: "⚡ **GravKtrl Dual-Mode Agent Bridge Connected.**\n\nDirectly inject prompts into Gemini 3.8 Flash inside Google Antigravity on your PC (both normal Antigravity.exe Win32 and CDP port 9222 supported). Live thoughts and file edits will stream here in real time.",
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     },
   ]);
@@ -43,6 +53,23 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
   const speechRef = useRef<{ start: () => void; stop: () => void; isSupported: boolean } | null>(null);
 
   useEffect(() => {
+    // Check initial agent status and recent file activity
+    client.getAgentStatus()
+      .then((st) => {
+        if (st.mode) {
+          setAttachMode(st.mode === "offline" ? "win32" : st.mode);
+        }
+      })
+      .catch(() => {});
+
+    client.getRecentWorkspaceActivity()
+      .then((res) => {
+        if (res && res.recentFiles) {
+          setRecentFiles(res.recentFiles);
+        }
+      })
+      .catch(() => {});
+
     // Subscribe to live agent streaming chunks
     const unsubStream = client.on("agent.streamChunk", (chunk: any) => {
       if (!chunk || !chunk.text) return;
@@ -71,6 +98,12 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
       });
     });
 
+    // Subscribe to live workspace file modification events
+    const unsubFiles = client.on("agent.fileModified", (evt: any) => {
+      if (!evt || !evt.file) return;
+      setRecentFiles((prev) => [evt, ...prev.slice(0, 39)]);
+    });
+
     // Voice recognition setup
     speechRef.current = client.createVoiceRecognition(
       (transcript) => {
@@ -85,6 +118,7 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
 
     return () => {
       unsubStream();
+      unsubFiles();
     };
   }, [client]);
 
@@ -114,7 +148,13 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
       setAgentStatus("injecting");
       const res = await client.sendPromptToAgent(text);
 
-      if (res.mode === "fallback") {
+      if (res.mode) {
+        setAttachMode(res.mode);
+      }
+
+      if (res.mode === "win32") {
+        setAgentStatus("win32_dispatched");
+      } else if (res.mode === "fallback") {
         setAgentStatus("staged_on_pc");
       } else {
         setAgentStatus("generating");
@@ -174,26 +214,42 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
           <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
           <span className="font-semibold text-cyan-400">Gemini 3.8 Flash</span>
           <span className="text-slate-500">•</span>
-          <span className="text-slate-400 truncate max-w-[170px]" title={activeWorkspace}>
+          <span className="text-slate-400 truncate max-w-[130px]" title={activeWorkspace}>
             {activeWorkspace.split(/[\\/]/).pop() || "Workspace"}
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
-          {agentStatus === "generating" ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-cyan-950/70 border border-cyan-800/60 text-cyan-300 text-[10px] animate-pulse">
-              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
-              THINKING
+        <div className="flex items-center gap-1.5">
+          {/* Exact attach mode badge */}
+          {attachMode === "cdp" ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-cyan-950/70 border border-cyan-800/60 text-cyan-300 text-[10px]" title="Chrome DevTools Protocol Port 9222 Active">
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+              CDP 9222
             </span>
-          ) : agentStatus === "staged_on_pc" ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-950/70 border border-amber-800/60 text-amber-300 text-[10px]">
-              CLIPBOARD STAGED
+          ) : attachMode === "win32" ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-950/70 border border-purple-800/60 text-purple-300 text-[10px]" title="Normal Windows Antigravity.exe Window Attached">
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+              WIN32
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900 border border-slate-800 text-slate-400 text-[10px]">
-              IDLE
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-950/70 border border-amber-800/60 text-amber-300 text-[10px]">
+              STAGED
             </span>
           )}
+
+          {/* Activity Drawer Toggle */}
+          <button
+            onClick={() => setShowActivity(!showActivity)}
+            className={`p-1 px-2 rounded text-[10px] flex items-center gap-1 border transition-colors ${
+              showActivity
+                ? "bg-cyan-900/80 border-cyan-600 text-cyan-200"
+                : "bg-[#161b22] border-[#30363d] text-slate-300 hover:text-white"
+            }`}
+            title="Toggle live workspace file activity feed"
+          >
+            <Activity className="w-3 h-3 text-cyan-400" />
+            <span>Files ({recentFiles.length})</span>
+          </button>
 
           {agentStatus === "generating" && (
             <button
@@ -206,6 +262,33 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
           )}
         </div>
       </div>
+
+      {/* Collapsible Live File Activity Stream */}
+      {showActivity && (
+        <div className="shrink-0 max-h-48 overflow-y-auto bg-[#070a12] border-b border-[#1b212c] p-2 space-y-1">
+          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1 mb-1 flex items-center justify-between">
+            <span>Live Workspace File Feed</span>
+            <span className="text-cyan-400 font-mono text-[10px]">{activeWorkspace.split(/[\\/]/).pop()}</span>
+          </div>
+          {recentFiles.length === 0 ? (
+            <div className="text-[11px] text-slate-500 py-3 text-center">No file modifications detected yet</div>
+          ) : (
+            recentFiles.map((f, i) => (
+              <div key={i} className="flex items-center justify-between px-2 py-1 rounded bg-[#0e131f] border border-[#1e2738] text-[11px]">
+                <span className="font-mono text-slate-200 truncate max-w-[70%]">
+                  <span className={f.action === "created" ? "text-emerald-400 font-bold" : f.action === "deleted" ? "text-rose-400 font-bold" : "text-cyan-400 font-bold"}>
+                    [{f.action.toUpperCase()}]
+                  </span>{" "}
+                  {f.file}
+                </span>
+                <span className="text-[10px] text-slate-500 font-mono">
+                  {new Date(f.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
       {/* Preset Macro Pills */}
       <div className="flex items-center gap-1.5 px-3 py-2 overflow-x-auto no-scrollbar bg-[#090b10] border-b border-[#1b212c]">

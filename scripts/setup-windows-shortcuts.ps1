@@ -1,11 +1,6 @@
 <#
 .SYNOPSIS
-  Configure Windows Shortcuts for Google Antigravity & GravKtrl PC Host
-.DESCRIPTION
-  1. Updates the Start Menu shortcut for Google Antigravity to always include
-     --remote-debugging-port=9222.
-  2. Creates a Desktop Shortcut for "Google Antigravity (GravKtrl CDP)".
-  3. Creates a 1-Click Desktop Shortcut for "GravKtrl PC Host".
+  Configure Windows Shortcuts for Google Antigravity & GravKtrl Windows Control
 #>
 
 $ErrorActionPreference = "Stop"
@@ -18,9 +13,10 @@ $wsh = New-Object -ComObject WScript.Shell
 $desktop = [System.Environment]::GetFolderPath('Desktop')
 $antigravityExe = "$env:LOCALAPPDATA\Programs\antigravity\Antigravity.exe"
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$icoPath = [System.IO.Path]::Combine($repoRoot, 'public', 'gravktrl.ico')
 
 # 1. Update Start Menu shortcut for Google Antigravity
-$startMenuLnk = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Antigravity.lnk"
+$startMenuLnk = [System.IO.Path]::Combine($env:APPDATA, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Antigravity.lnk')
 if (Test-Path $startMenuLnk) {
     try {
         $lnk = $wsh.CreateShortcut($startMenuLnk)
@@ -28,16 +24,16 @@ if (Test-Path $startMenuLnk) {
         $lnk.Save()
         Write-Host "✓ [Start Menu] Updated Antigravity shortcut to launch with --remote-debugging-port=9222" -ForegroundColor Green
     } catch {
-        Write-Host "[WARNING] Could not update Start Menu shortcut: $_" -ForegroundColor Yellow
+        Write-Host ("WARNING: Could not update Start Menu shortcut: " + $_.Exception.Message) -ForegroundColor Yellow
     }
 } else {
-    Write-Host "[INFO] Start Menu shortcut not found at $startMenuLnk" -ForegroundColor DarkGray
+    Write-Host ("INFO: Start Menu shortcut not found at " + $startMenuLnk) -ForegroundColor DarkGray
 }
 
 # 2. Create Desktop Shortcut for Google Antigravity (GravKtrl CDP)
 if (Test-Path $antigravityExe) {
     try {
-        $desktopAntigravityLnk = Join-Path $desktop "Google Antigravity (GravKtrl CDP).lnk"
+        $desktopAntigravityLnk = [System.IO.Path]::Combine($desktop, 'Google Antigravity (GravKtrl CDP).lnk')
         $lnk = $wsh.CreateShortcut($desktopAntigravityLnk)
         $lnk.TargetPath = $antigravityExe
         $lnk.Arguments = "--remote-debugging-port=9222"
@@ -47,32 +43,53 @@ if (Test-Path $antigravityExe) {
         $lnk.Save()
         Write-Host "✓ [Desktop] Created shortcut: 'Google Antigravity (GravKtrl CDP)'" -ForegroundColor Green
     } catch {
-        Write-Host "[WARNING] Could not create Desktop shortcut for Antigravity: $_" -ForegroundColor Yellow
+        Write-Host ("WARNING: Could not create Desktop shortcut for Antigravity: " + $_.Exception.Message) -ForegroundColor Yellow
     }
 }
 
-# 3. Create Desktop Shortcut for GravKtrl PC Host Daemon
+# 3. Create Desktop Shortcut for GravKtrl Windows Desktop App
 try {
-    $desktopGravLnk = Join-Path $desktop "GravKtrl PC Host.lnk"
-    $startScript = Join-Path $repoRoot "scripts\start-gravktrl-pc.ps1"
+    $desktopAppLnk = [System.IO.Path]::Combine($desktop, 'GravKtrl Windows Control.lnk')
+    $batPath = [System.IO.Path]::Combine($repoRoot, 'GravKtrl-Windows.bat')
+    
+    $lnk = $wsh.CreateShortcut($desktopAppLnk)
+    $lnk.TargetPath = $batPath
+    $lnk.WorkingDirectory = $repoRoot
+    $lnk.Description = "Launch GravKtrl Windows Desktop App & Frameless Control Center"
+    if (Test-Path $icoPath) {
+        $lnk.IconLocation = "$icoPath,0"
+    }
+    $lnk.Save()
+    Write-Host "✓ [Desktop] Created shortcut: 'GravKtrl Windows Control'" -ForegroundColor Green
+} catch {
+    Write-Host ("WARNING: Could not create Desktop shortcut for GravKtrl Windows Control: " + $_.Exception.Message) -ForegroundColor Yellow
+}
+
+# 4. Create Desktop Shortcut for GravKtrl PC Host Daemon (Terminal Mode)
+try {
+    $desktopGravLnk = [System.IO.Path]::Combine($desktop, 'GravKtrl PC Host (Console).lnk')
+    $startScript = [System.IO.Path]::Combine($repoRoot, 'scripts', 'start-gravktrl-pc.ps1')
     
     $lnk = $wsh.CreateShortcut($desktopGravLnk)
-    $lnk.TargetPath = "powershell.exe"
-    $lnk.Arguments = "-ExecutionPolicy Bypass -NoExit -File `"$startScript`""
+    $lnk.TargetPath = 'powershell.exe'
+    $lnk.Arguments = '-ExecutionPolicy Bypass -NoExit -File "' + $startScript + '"'
     $lnk.WorkingDirectory = $repoRoot
-    $lnk.Description = "1-Click Launch for GravKtrl PC Host Daemon"
-    if (Test-Path $antigravityExe) {
+    $lnk.Description = "Launch GravKtrl PC Host Daemon with Live Console"
+    if (Test-Path $icoPath) {
+        $lnk.IconLocation = "$icoPath,0"
+    } elseif (Test-Path $antigravityExe) {
         $lnk.IconLocation = "$antigravityExe,0"
     }
     $lnk.Save()
-    Write-Host "✓ [Desktop] Created shortcut: 'GravKtrl PC Host'" -ForegroundColor Green
+    Write-Host "✓ [Desktop] Created shortcut: 'GravKtrl PC Host (Console)'" -ForegroundColor Green
 } catch {
-    Write-Host "[WARNING] Could not create Desktop shortcut for GravKtrl: $_" -ForegroundColor Yellow
+    Write-Host ("WARNING: Could not create Desktop shortcut for GravKtrl Console: " + $_.Exception.Message) -ForegroundColor Yellow
 }
 
 Write-Host ""
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "  SETUP COMPLETE! You can now launch both apps directly from Desktop: " -ForegroundColor Green
-Write-Host "   1. Double-click 'Google Antigravity (GravKtrl CDP)'                 " -ForegroundColor White
-Write-Host "   2. Double-click 'GravKtrl PC Host'                                  " -ForegroundColor White
+Write-Host "  SETUP COMPLETE! Desktop Shortcuts configured with gravktrl.ico:    " -ForegroundColor Green
+Write-Host "   1. 'GravKtrl Windows Control' -> Frameless Desktop Control Center  " -ForegroundColor White
+Write-Host "   2. 'Google Antigravity (GravKtrl CDP)' -> Antigravity with port 9222" -ForegroundColor White
+Write-Host "   3. 'GravKtrl PC Host (Console)' -> Terminal console host           " -ForegroundColor White
 Write-Host "======================================================================" -ForegroundColor Cyan

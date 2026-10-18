@@ -45,6 +45,10 @@ export class GravKtrlAuth {
     return this.token;
   }
 
+  public getMasterToken(): string {
+    return this.token;
+  }
+
   public getPin(): string {
     return this.pairingPin;
   }

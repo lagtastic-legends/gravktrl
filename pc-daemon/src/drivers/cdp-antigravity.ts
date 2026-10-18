@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { execFile } from "node:child_process";
 import { WebSocket } from "ws";
 import type { AgentDriver } from "../server.js";
+import { Win32AntigravityBridge, type AntigravityProcessInfo } from "./win32-antigravity-bridge.js";
 
 interface CdpTarget {
   id: string;
@@ -22,9 +23,16 @@ export class CdpAntigravityDriver implements AgentDriver {
   private streamListeners: Array<(chunk: { text: string; isComplete: boolean; status: string }) => void> = [];
   private pollingTimer: NodeJS.Timeout | null = null;
   private nextRpcId: number = 1;
+  private win32Bridge: Win32AntigravityBridge;
+  private lastAttachMode: "cdp" | "win32" | "fallback" = "cdp";
 
   constructor(cdpPort: number = 9222) {
     this.cdpPort = cdpPort;
+    this.win32Bridge = new Win32AntigravityBridge();
+  }
+
+  public getWin32Bridge(): Win32AntigravityBridge {
+    return this.win32Bridge;
   }
 
   public onStreamChunk(listener: (chunk: { text: string; isComplete: boolean; status: string }) => void): void {
@@ -41,12 +49,22 @@ export class CdpAntigravityDriver implements AgentDriver {
     }
   }
 
-  public getAgentStatus(): { isRunning: boolean; currentTask?: string; lastResponse?: string; cdpAttached: boolean } {
+  public getAgentStatus(): {
+    isRunning: boolean;
+    currentTask?: string;
+    lastResponse?: string;
+    cdpAttached: boolean;
+    mode: "cdp" | "win32" | "offline";
+    processName?: string;
+  } {
+    const isCdp = this.activeWs !== null && this.activeWs.readyState === WebSocket.OPEN;
     return {
       isRunning: this.isAgentActive,
       currentTask: this.currentTask,
       lastResponse: this.lastResponse,
-      cdpAttached: this.activeWs !== null && this.activeWs.readyState === WebSocket.OPEN,
+      cdpAttached: isCdp,
+      mode: isCdp ? "cdp" : this.lastAttachMode === "win32" ? "win32" : "offline",
+      processName: "Antigravity.exe",
     };
   }
 
@@ -150,134 +168,167 @@ export class CdpAntigravityDriver implements AgentDriver {
   public async sendPrompt(
     prompt: string,
     activeWorkspace: string
-  ): Promise<{ success: boolean; mode: "cdp" | "fallback"; message: string }> {
+  ): Promise<{ success: boolean; mode: "cdp" | "win32" | "fallback"; message: string }> {
     this.currentTask = prompt;
     this.isAgentActive = true;
 
+    // STEP 1: Check if CDP (port 9222) is listening
     try {
       const targets = await this.fetchCdpTargets();
-      // Target could be an Antigravity/VS Code window or renderer
       const candidate =
         targets.find((t) => t.type === "page" && (t.title.includes("Antigravity") || t.title.includes("Workspace"))) ||
         targets.find((t) => t.type === "page") ||
         targets[0];
 
-      if (!candidate || !candidate.webSocketDebuggerUrl) {
-        return await this.fallbackPromptQueue(prompt, activeWorkspace, "CDP port 9222 target not found");
-      }
+      if (candidate && candidate.webSocketDebuggerUrl) {
+        const ws = await this.connectToTarget(candidate);
 
-      const ws = await this.connectToTarget(candidate);
+        const injectionScript = `
+          (() => {
+            try {
+              const selectors = [
+                'textarea[placeholder*="Ask"]',
+                'textarea[placeholder*="prompt"]',
+                'textarea[placeholder*="agent"]',
+                'div.monaco-editor [contenteditable="true"]',
+                'textarea',
+                '[contenteditable="true"]'
+              ];
 
-      // Injection script: search for Antigravity chat input element, set value, dispatch input event, and trigger submission
-      const injectionScript = `
-        (() => {
-          try {
-            // Find input field: textarea, contenteditable, or monaco/chat input
-            const selectors = [
-              'textarea[placeholder*="Ask"]',
-              'textarea[placeholder*="prompt"]',
-              'textarea[placeholder*="agent"]',
-              'div.monaco-editor [contenteditable="true"]',
-              'textarea',
-              '[contenteditable="true"]'
-            ];
-
-            let inputEl = null;
-            for (const sel of selectors) {
-              const el = document.querySelector(sel);
-              if (el && (el.offsetParent !== null || el.offsetWidth > 0 || el.offsetHeight > 0)) {
-                inputEl = el;
-                break;
+              let inputEl = null;
+              for (const sel of selectors) {
+                const el = document.querySelector(sel);
+                if (el && (el.offsetParent !== null || el.offsetWidth > 0 || el.offsetHeight > 0)) {
+                  inputEl = el;
+                  break;
+                }
               }
-            }
 
-            if (!inputEl) {
-              return { success: false, reason: "No visible chat input found in DOM" };
-            }
+              if (!inputEl) {
+                return { success: false, reason: "No visible chat input found in DOM" };
+              }
 
-            inputEl.focus();
-            const textToInsert = ${JSON.stringify(prompt)};
+              inputEl.focus();
+              const textToInsert = ${JSON.stringify(prompt)};
 
-            if (inputEl.tagName === "TEXTAREA" || inputEl.tagName === "INPUT") {
-              const proto = Object.getPrototypeOf(inputEl);
-              const valSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set ||
-                                Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-              if (valSetter) {
-                valSetter.call(inputEl, textToInsert);
+              if (inputEl.tagName === "TEXTAREA" || inputEl.tagName === "INPUT") {
+                const proto = Object.getPrototypeOf(inputEl);
+                const valSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set ||
+                                  Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+                if (valSetter) {
+                  valSetter.call(inputEl, textToInsert);
+                } else {
+                  inputEl.value = textToInsert;
+                }
               } else {
-                inputEl.value = textToInsert;
+                inputEl.innerText = textToInsert;
               }
-            } else {
-              inputEl.innerText = textToInsert;
+
+              inputEl.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, data: textToInsert }));
+              inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+
+              const enterEvtDown = new KeyboardEvent('keydown', {
+                key: 'Enter',
+                code: 'Enter',
+                keyCode: 13,
+                which: 13,
+                bubbles: true,
+                cancelable: true
+              });
+              const enterEvtUp = new KeyboardEvent('keyup', {
+                key: 'Enter',
+                code: 'Enter',
+                keyCode: 13,
+                which: 13,
+                bubbles: true,
+                cancelable: true
+              });
+
+              inputEl.dispatchEvent(enterEvtDown);
+              inputEl.dispatchEvent(enterEvtUp);
+
+              const sendBtn = document.querySelector('button[aria-label*="Send"], button[title*="Send"], button.send-button');
+              if (sendBtn) {
+                sendBtn.click();
+              }
+
+              return { success: true };
+            } catch (e) {
+              return { success: false, error: String(e) };
             }
+          })()
+        `;
 
-            inputEl.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, data: textToInsert }));
-            inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+        const evalResult = (await this.callCdpMethod(ws, "Runtime.evaluate", {
+          expression: injectionScript,
+          returnByValue: true,
+        })) as { result?: { value?: { success?: boolean; reason?: string; error?: string } } };
 
-            // Dispatch Enter key event
-            const enterEvtDown = new KeyboardEvent('keydown', {
-              key: 'Enter',
-              code: 'Enter',
-              keyCode: 13,
-              which: 13,
-              bubbles: true,
-              cancelable: true
-            });
-            const enterEvtUp = new KeyboardEvent('keyup', {
-              key: 'Enter',
-              code: 'Enter',
-              keyCode: 13,
-              which: 13,
-              bubbles: true,
-              cancelable: true
-            });
+        const value = evalResult?.result?.value;
+        if (value && value.success) {
+          this.lastAttachMode = "cdp";
+          this.startDomStreamPoller(ws);
+          this.emitStreamChunk({
+            text: `[CDP Connected: Port ${this.cdpPort}]\nPrompt injected into Antigravity DOM:\n> ${prompt}\n\nObserving agent thoughts & stream...`,
+            isComplete: false,
+            status: "running",
+          });
+          return {
+            success: true,
+            mode: "cdp",
+            message: "Prompt injected into Antigravity IDE successfully via Chrome DevTools Protocol",
+          };
+        }
+      }
+    } catch {
+      // CDP not listening or error, proceed to Win32 check
+    }
 
-            inputEl.dispatchEvent(enterEvtDown);
-            inputEl.dispatchEvent(enterEvtUp);
+    // STEP 2: CDP is inactive. Check if normal Antigravity.exe is running on Windows!
+    console.log("[DualDriver] CDP port 9222 inactive. Checking for running Antigravity.exe via Win32...");
+    const procInfo: AntigravityProcessInfo = await this.win32Bridge.getProcessInfo();
 
-            // Also look for send button
-            const sendBtn = document.querySelector('button[aria-label*="Send"], button[title*="Send"], button.send-button');
-            if (sendBtn) {
-              sendBtn.click();
-            }
-
-            return { success: true };
-          } catch (e) {
-            return { success: false, error: String(e) };
-          }
-        })()
-      `;
-
-      const evalResult = (await this.callCdpMethod(ws, "Runtime.evaluate", {
-        expression: injectionScript,
-        returnByValue: true,
-      })) as { result?: { value?: { success?: boolean; reason?: string; error?: string } } };
-
-      const value = evalResult?.result?.value;
-      if (value && value.success) {
-        this.startDomStreamPoller(ws);
+    if (procInfo.running) {
+      this.lastAttachMode = "win32";
+      console.log(`[DualDriver] Found running Antigravity process PID ${procInfo.pid} ("${procInfo.mainWindowTitle}")`);
+      
+      const win32Res = await this.win32Bridge.injectPromptViaWin32(prompt, activeWorkspace);
+      if (win32Res.success) {
         this.emitStreamChunk({
-          text: `[CDP Connected] Prompt injected into Antigravity IDE:\n> ${prompt}\n\nObserving agent responses...`,
-          isComplete: false,
-          status: "running",
+          text: `[Win32 Attached: Normal Process]\nInjected prompt into "${win32Res.windowTitle || procInfo.mainWindowTitle}"\n> ${prompt}\n\nAntigravity is now processing your request. Live file modifications will stream here in real time.`,
+          isComplete: true,
+          status: "dispatched",
         });
+
+        this.isAgentActive = false;
         return {
           success: true,
-          mode: "cdp",
-          message: "Prompt injected into Antigravity IDE successfully via Chrome DevTools Protocol",
+          mode: "win32",
+          message: win32Res.message,
         };
       }
-
-      // If injection failed to locate input, fallback to file queue and clipboard
-      return await this.fallbackPromptQueue(
-        prompt,
-        activeWorkspace,
-        value?.reason || value?.error || "Chat input element not active"
-      );
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      return await this.fallbackPromptQueue(prompt, activeWorkspace, `CDP Connection Error: ${errMsg}`);
     }
+
+    // STEP 3: Antigravity is not running at all. Offer auto-launch with CDP or fallback queue.
+    console.log("[DualDriver] Antigravity is not currently running. Attempting auto-launch with CDP port 9222...");
+    const launchRes = await this.win32Bridge.launchWithCdp(activeWorkspace);
+    
+    if (launchRes.success) {
+      // Wait for process to initialize and port 9222 to bind
+      await new Promise((r) => setTimeout(r, 4000));
+      const retryTargets = await this.fetchCdpTargets();
+      if (retryTargets.length > 0) {
+        this.lastAttachMode = "cdp";
+        return await this.sendPrompt(prompt, activeWorkspace);
+      }
+    }
+
+    // STEP 4: Ultimate Fallback: Stage to Clipboard & .antigravity/GRAVKTRL_INBOX.md
+    return await this.fallbackPromptQueue(
+      prompt,
+      activeWorkspace,
+      "Antigravity is not running or window focus could not be acquired"
+    );
   }
 
   private startDomStreamPoller(ws: WebSocket): void {
@@ -297,7 +348,6 @@ export class CdpAntigravityDriver implements AgentDriver {
         const pollScript = `
           (() => {
             try {
-              // Look for response containers or conversation turns
               const turns = document.querySelectorAll('.chat-turn, .conversation-turn, .message-bubble, [data-message-author="agent"]');
               if (turns.length > 0) {
                 const lastTurn = turns[turns.length - 1];
@@ -342,9 +392,9 @@ export class CdpAntigravityDriver implements AgentDriver {
     activeWorkspace: string,
     reason: string
   ): Promise<{ success: boolean; mode: "fallback"; message: string }> {
+    this.lastAttachMode = "fallback";
     console.warn(`[CDP] Using fallback queue: ${reason}`);
 
-    // 1. Write prompt to <activeWorkspace>/.antigravity/GRAVKTRL_INBOX.md
     const inboxDir = path.join(activeWorkspace, ".antigravity");
     const inboxFile = path.join(inboxDir, "GRAVKTRL_INBOX.md");
 
@@ -357,7 +407,7 @@ export class CdpAntigravityDriver implements AgentDriver {
       const content = `# GRAVKTRL MOBILE INBOX PROMPT
 - **Timestamp**: ${timestamp}
 - **Workspace**: ${activeWorkspace}
-- **Source**: GravKtrl Mobile Commander (` + "com.gravktrl.app" + `)
+- **Source**: GravKtrl Mobile Commander (com.gravktrl.app)
 - **Status**: PENDING_PASTE
 
 ---
@@ -369,10 +419,8 @@ ${prompt}
       console.error("[CDP Fallback] Failed to write inbox file:", writeErr);
     }
 
-    // 2. Copy prompt to Windows system clipboard via PowerShell
     try {
       await new Promise<void>((resolve) => {
-        // Escape special chars for PowerShell
         const escaped = prompt.replace(/"/g, '`"');
         const psCommand = `Set-Clipboard -Value "${escaped}"`;
         execFile("powershell.exe", ["-NoLogo", "-NoProfile", "-Command", psCommand], () => {

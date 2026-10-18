@@ -462,7 +462,7 @@ export class GravKtrlClient {
     return this.call("workspace.add", { path: targetPath, name });
   }
 
-  public sendPromptToAgent(prompt: string): Promise<{ success: boolean; mode: "cdp" | "fallback"; message: string }> {
+  public sendPromptToAgent(prompt: string): Promise<{ success: boolean; mode: "cdp" | "win32" | "fallback"; message: string }> {
     return this.call("agent.sendPrompt", { prompt });
   }
 
@@ -470,8 +470,22 @@ export class GravKtrlClient {
     return this.call("agent.stop");
   }
 
-  public getAgentStatus(): Promise<{ isRunning: boolean; currentTask?: string; lastResponse?: string; cdpAttached: boolean }> {
+  public getAgentStatus(): Promise<{
+    isRunning: boolean;
+    currentTask?: string;
+    lastResponse?: string;
+    cdpAttached: boolean;
+    mode?: "cdp" | "win32" | "offline";
+    processName?: string;
+  }> {
     return this.call("agent.status");
+  }
+
+  public getRecentWorkspaceActivity(): Promise<{
+    activeWorkspace: string;
+    recentFiles: Array<{ file: string; action: "created" | "modified" | "deleted"; size?: number; timestamp: string }>;
+  }> {
+    return this.call("workspace.recentActivity");
   }
 
   public executeTerminal(

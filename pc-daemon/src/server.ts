@@ -8,6 +8,8 @@ import { WorkspaceManager } from "./workspace-manager.js";
 import { CdpAntigravityDriver } from "./drivers/cdp-antigravity.js";
 import { TerminalEngineDriver } from "./drivers/terminal-engine.js";
 import { GitEngineDriver } from "./drivers/git-engine.js";
+import { WorkspaceWatcher } from "./drivers/workspace-watcher.js";
+import { renderDesktopHtml } from "./desktop-ui.js";
 
 export interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -35,10 +37,11 @@ export interface JsonRpcNotification {
 
 // Driver delegates for Phase 2 integration
 export interface AgentDriver {
-  sendPrompt(prompt: string, activeWorkspace: string): Promise<{ success: boolean; mode: "cdp" | "fallback"; message: string }>;
+  sendPrompt(prompt: string, activeWorkspace: string): Promise<{ success: boolean; mode: "cdp" | "win32" | "fallback"; message: string }>;
   stopAgent(): Promise<{ success: boolean; message: string }>;
-  getAgentStatus(): { isRunning: boolean; currentTask?: string; lastResponse?: string; cdpAttached: boolean };
+  getAgentStatus(): { isRunning: boolean; currentTask?: string; lastResponse?: string; cdpAttached: boolean; mode?: "cdp" | "win32" | "offline"; processName?: string };
   onStreamChunk?(listener: (chunk: { text: string; isComplete: boolean; status: string }) => void): void;
+  getWin32Bridge?(): any;
 }
 
 export interface TerminalDriver {
@@ -68,6 +71,7 @@ export class GravKtrlServer {
   private auth: GravKtrlAuth;
   private telemetry: TelemetryCollector;
   private workspaceManager: WorkspaceManager;
+  private workspaceWatcher: WorkspaceWatcher;
   private authenticatedSockets: Set<WebSocket> = new Set();
 
   private agentDriver?: AgentDriver;
@@ -79,6 +83,11 @@ export class GravKtrlServer {
     this.auth = new GravKtrlAuth(baseDir);
     this.telemetry = new TelemetryCollector();
     this.workspaceManager = new WorkspaceManager(baseDir);
+    this.workspaceWatcher = new WorkspaceWatcher(this.workspaceManager.getActiveWorkspace());
+
+    this.workspaceWatcher.onFileChange((event) => {
+      this.broadcastNotification("agent.fileModified", event as unknown as Record<string, unknown>);
+    });
 
     this.httpServer = http.createServer((req, res) => this.handleHttpRequest(req, res));
     this.wss = new WebSocketServer({ noServer: true });
@@ -124,6 +133,14 @@ export class GravKtrlServer {
 
   public getWorkspaceManager(): WorkspaceManager {
     return this.workspaceManager;
+  }
+
+  public getWorkspaceWatcher(): WorkspaceWatcher {
+    return this.workspaceWatcher;
+  }
+
+  public getAgentDriver(): AgentDriver | undefined {
+    return this.agentDriver;
   }
 
   private setupHttpUpgrade(): void {
@@ -326,6 +343,45 @@ export class GravKtrlServer {
       }
     }
 
+    // Windows Desktop Control Center: GET /desktop
+    if (req.method === "GET" && (pathname === "/desktop" || pathname === "/desktop/")) {
+      const beacon = this.auth.getDiscoveryBeacon(this.port);
+      const pin = this.auth.getPin();
+      const masterToken = this.auth.getMasterToken();
+      const activeWs = this.workspaceManager.getActiveWorkspace();
+      const workspaces = this.workspaceManager.listWorkspaces();
+      const cdpHealth = await this.telemetry.checkCdpHealth();
+      const html = renderDesktopHtml({
+        hostname: beacon.name,
+        port: this.port,
+        lanIp: beacon.lanIp,
+        tailscaleIp: beacon.tailscaleIp,
+        pin,
+        masterToken,
+        activeWorkspace: activeWs,
+        workspaces,
+        cdpActive: cdpHealth.healthy,
+        version: "1.1.0",
+      });
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(html);
+      return;
+    }
+
+    // Launch Antigravity endpoint: POST /api/launch-antigravity
+    if (req.method === "POST" && pathname === "/api/launch-antigravity") {
+      if (this.agentDriver && this.agentDriver.getWin32Bridge) {
+        const bridge = this.agentDriver.getWin32Bridge();
+        const launchResult = await bridge.launchWithCdp(this.workspaceManager.getActiveWorkspace());
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(launchResult));
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ success: true, message: "Launch signaled" }));
+      return;
+    }
+
     // Serve Static Mobile Web Commander HUD (out/ directory)
     if (req.method === "GET" && !pathname.startsWith("/rpc")) {
       const outDir = path.resolve(process.cwd(), "out");
@@ -465,7 +521,19 @@ export class GravKtrlServer {
               error: { code: -32002, message: switched.error || "Failed to switch workspace" },
             };
           }
+          this.workspaceWatcher.setWorkspace(targetPath);
           return { jsonrpc: "2.0", id, result: switched };
+        }
+
+        case "workspace.recentActivity": {
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              activeWorkspace: activeWs,
+              recentFiles: this.workspaceWatcher.getRecentHistory(),
+            },
+          };
         }
 
         // AGENT (CDP Bridge & Inbox Fallback)
@@ -670,6 +738,7 @@ export class GravKtrlServer {
   }
 
   public stop(): Promise<void> {
+    this.workspaceWatcher.stop();
     return new Promise((resolve) => {
       for (const socket of this.authenticatedSockets) {
         try {
