@@ -93,6 +93,37 @@ export interface ChatMessage {
   status?: string;
 }
 
+export interface ModelInfo {
+  id: string;
+  name: string;
+  tier: string;
+  badge: string;
+  group: "gemini" | "claude_gpt";
+  isAvailable: boolean;
+  isSelected: boolean;
+  notice?: string;
+  description: string;
+}
+
+export interface LimitQuota {
+  remainingPercent: number;
+  resetFormatted: string;
+  resetTimestamp: number;
+}
+
+export interface ModelUsageData {
+  gemini: {
+    weekly: LimitQuota;
+    fiveHour: LimitQuota;
+  };
+  claudeGpt: {
+    weekly: LimitQuota;
+    fiveHour: LimitQuota;
+  };
+  activeModelId: string;
+  lastUpdated: string;
+}
+
 export type ConnectionState = "disconnected" | "connecting" | "connected" | "authenticated" | "error";
 
 type EventCallback<T = unknown> = (data: T) => void;
@@ -533,6 +564,19 @@ export class GravKtrlClient {
 
   public createConversation(projectId?: string): Promise<{ success: boolean; conversationId?: string; message: string }> {
     return this.call("conversation.new", { projectId });
+  }
+
+  // --- Antigravity Model Selection & Quota Limits ---
+  public listModels(): Promise<{ models: ModelInfo[]; usage: ModelUsageData }> {
+    return this.call("model.list");
+  }
+
+  public getModelUsage(): Promise<ModelUsageData> {
+    return this.call("model.usage");
+  }
+
+  public selectModel(modelId: string): Promise<{ success: boolean; model?: ModelInfo; message: string }> {
+    return this.call("model.select", { modelId });
   }
 
   public executeTerminal(

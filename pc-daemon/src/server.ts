@@ -10,6 +10,7 @@ import { TerminalEngineDriver } from "./drivers/terminal-engine.js";
 import { GitEngineDriver } from "./drivers/git-engine.js";
 import { WorkspaceWatcher } from "./drivers/workspace-watcher.js";
 import { AntigravityConversationManager } from "./drivers/antigravity-conversation-manager.js";
+import { ModelManager, type ModelUsageData, type ModelInfo } from "./drivers/model-manager.js";
 import { renderDesktopHtml } from "./desktop-ui.js";
 
 export interface JsonRpcRequest {
@@ -74,6 +75,7 @@ export class GravKtrlServer {
   private workspaceManager: WorkspaceManager;
   private workspaceWatcher: WorkspaceWatcher;
   private conversationManager: AntigravityConversationManager;
+  private modelManager: ModelManager;
   private authenticatedSockets: Set<WebSocket> = new Set();
 
   private agentDriver?: AgentDriver;
@@ -87,6 +89,7 @@ export class GravKtrlServer {
     this.workspaceManager = new WorkspaceManager(baseDir);
     this.workspaceWatcher = new WorkspaceWatcher(this.workspaceManager.getActiveWorkspace());
     this.conversationManager = new AntigravityConversationManager();
+    this.modelManager = new ModelManager(baseDir);
 
     this.workspaceWatcher.onFileChange((event) => {
       this.broadcastNotification("agent.fileModified", event as unknown as Record<string, unknown>);
@@ -94,6 +97,16 @@ export class GravKtrlServer {
 
     this.conversationManager.onStream((event) => {
       this.broadcastNotification("agent.streamChunk", event.chunk);
+    });
+
+    // Real-time notification whenever ANY conversation in ANY project is modified or added
+    this.conversationManager.onListUpdate((data) => {
+      this.broadcastNotification("conversation.listUpdated", data);
+    });
+
+    // Real-time notification whenever model quota usage or timers update
+    this.modelManager.onUsageUpdate((data) => {
+      this.broadcastNotification("model.usageUpdated", data);
     });
 
     this.httpServer = http.createServer((req, res) => this.handleHttpRequest(req, res));
@@ -236,7 +249,7 @@ export class GravKtrlServer {
     }
   }
 
-  public broadcastNotification(method: string, params: Record<string, unknown>): void {
+  public broadcastNotification(method: string, params: any): void {
     const notification: JsonRpcNotification = {
       jsonrpc: "2.0",
       method,
@@ -596,6 +609,9 @@ export class GravKtrlServer {
             };
           }
 
+          // Record model usage on every prompt dispatched
+          this.modelManager.recordRequestUsage();
+
           // Ensure active conversation is watched for immediate live output streaming
           const activeConv = this.conversationManager.getActiveConversationId();
           if (activeConv) {
@@ -767,6 +783,39 @@ export class GravKtrlServer {
           return { jsonrpc: "2.0", id, result: res };
         }
 
+        // MODEL SELECTION & USAGE QUOTAS
+        case "model.list": {
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              models: this.modelManager.getModels(),
+              usage: this.modelManager.getUsage(),
+            },
+          };
+        }
+
+        case "model.usage": {
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: this.modelManager.getUsage(),
+          };
+        }
+
+        case "model.select": {
+          const modelId = params.modelId as string;
+          if (!modelId) {
+            return {
+              jsonrpc: "2.0",
+              id,
+              error: { code: -32602, message: "Missing required parameter: modelId" },
+            };
+          }
+          const res = this.modelManager.selectModel(modelId);
+          return { jsonrpc: "2.0", id, result: res };
+        }
+
         default:
           return {
             jsonrpc: "2.0",
@@ -795,6 +844,8 @@ export class GravKtrlServer {
 
   public stop(): Promise<void> {
     this.workspaceWatcher.stop();
+    this.conversationManager.dispose();
+    this.modelManager.dispose();
     return new Promise((resolve) => {
       for (const socket of this.authenticatedSockets) {
         try {

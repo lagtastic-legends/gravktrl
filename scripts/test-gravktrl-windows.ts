@@ -167,6 +167,72 @@ async function runWindowsSuite() {
       console.log(`      conversation.getMessages verified: retrieved ${convMsgs.messages.length} messages for active conversation`);
     }
 
+    // 8. Test Model Manager RPCs (model.list, model.usage, model.select)
+    console.log("[8/8] Testing JSON-RPC model.list, model.usage, and model.select...");
+    const modelListPromise = new Promise<any>((resolve, reject) => {
+      const id = 1004;
+      const handler = (raw: any) => {
+        try {
+          const res = JSON.parse(raw.toString());
+          if (res.id === id) {
+            ws.removeListener("message", handler);
+            resolve(res.result);
+          }
+        } catch {}
+      };
+      ws.on("message", handler);
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id, method: "model.list", params: {} }));
+      setTimeout(() => reject(new Error("RPC model.list timed out")), 4000);
+    });
+
+    const modelList = await modelListPromise;
+    if (!modelList || !Array.isArray(modelList.models) || !modelList.usage) {
+      throw new Error("Invalid model.list response: " + JSON.stringify(modelList));
+    }
+    console.log(`      model.list verified: ${modelList.models.length} models, weekly limit=${modelList.usage.gemini.weekly.remainingPercent}%`);
+
+    // Test model.select
+    const modelSelectPromise = new Promise<any>((resolve, reject) => {
+      const id = 1005;
+      const handler = (raw: any) => {
+        try {
+          const res = JSON.parse(raw.toString());
+          if (res.id === id) {
+            ws.removeListener("message", handler);
+            resolve(res.result);
+          }
+        } catch {}
+      };
+      ws.on("message", handler);
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id, method: "model.select", params: { modelId: "claude-sonnet-4.6" } }));
+      setTimeout(() => reject(new Error("RPC model.select timed out")), 4000);
+    });
+
+    const selectResult = await modelSelectPromise;
+    if (!selectResult || !selectResult.success) {
+      throw new Error("model.select failed: " + JSON.stringify(selectResult));
+    }
+    console.log(`      model.select verified: ${selectResult.message}`);
+
+    // Re-select default gemini-3.8-flash
+    const reselectPromise = new Promise<any>((resolve, reject) => {
+      const id = 1006;
+      const handler = (raw: any) => {
+        try {
+          const res = JSON.parse(raw.toString());
+          if (res.id === id) {
+            ws.removeListener("message", handler);
+            resolve(res.result);
+          }
+        } catch {}
+      };
+      ws.on("message", handler);
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id, method: "model.select", params: { modelId: "gemini-3.8-flash" } }));
+      setTimeout(() => reject(new Error("RPC model.select reset timed out")), 4000);
+    });
+    await reselectPromise;
+    console.log("      model.select reset back to Gemini 3.8 Flash cleanly.");
+
     ws.close();
     console.log("\n==================================================================");
     console.log("  ✓ ALL TESTS PASSED! GRAVKTRL WINDOWS APP & DUAL DRIVER ARE READY");

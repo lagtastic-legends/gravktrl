@@ -20,6 +20,7 @@ android/local.properties
 # Local Auth & Workspace configs (Zero Secret Leakage)
 .gravktrl-auth.json
 .gravktrl-workspaces.json
+.gravktrl-quota.json
 .antigravity/
 
 # Misc / OS

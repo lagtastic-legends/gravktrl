@@ -40,11 +40,21 @@ export class AntigravityConversationManager {
   private activeFileWatcher: fs.FSWatcher | null = null;
   private lastFileOffset: number = 0;
   private streamListeners: Array<(event: { conversationId: string; chunk: any }) => void> = [];
+  
+  // Real-time Database & Projects list watchers
+  private listListeners: Array<(data: { projects: ProjectGroup[]; activeConversationId: string | null }) => void> = [];
+  private dbWatcher: fs.FSWatcher | null = null;
+  private dbPollTimer: NodeJS.Timeout | null = null;
+  private lastDbMtime: number = 0;
+  private debounceTimer: NodeJS.Timeout | null = null;
 
   constructor() {
     const userProfile = process.env.USERPROFILE || "C:\\Users\\devra";
     this.antigravityDir = path.join(userProfile, ".gemini", "antigravity");
     this.dbPath = path.join(this.antigravityDir, "conversation_summaries.db");
+
+    // Start watching conversation database for real-time project/conversation updates
+    this.startWatchingDatabase();
   }
 
   private getDatabase(): any {
@@ -138,7 +148,6 @@ export class AntigravityConversationManager {
             const uris = JSON.parse(row.workspace_uris);
             if (Array.isArray(uris) && uris.length > 0 && uris[0]) {
               const decoded = decodeURIComponent(uris[0]).replace(/^file:\/\/\/?/, "");
-              // Normalize windows path
               const normalized = decoded.replace(/\//g, "\\");
               workspacePath = normalized;
               projectName = path.basename(normalized);
@@ -190,7 +199,7 @@ export class AntigravityConversationManager {
     }
   }
 
-  public getConversationMessages(conversationId: string, limit = 50): ChatMessage[] {
+  public getConversationMessages(conversationId: string, limit = 80): ChatMessage[] {
     const transcriptPath = path.join(
       this.antigravityDir,
       "brain",
@@ -267,12 +276,27 @@ export class AntigravityConversationManager {
     this.streamListeners.push(listener);
   }
 
+  public onListUpdate(listener: (data: { projects: ProjectGroup[]; activeConversationId: string | null }) => void): void {
+    this.listListeners.push(listener);
+  }
+
   private emitStream(event: { conversationId: string; chunk: any }): void {
     for (const listener of this.streamListeners) {
       try {
         listener(event);
       } catch (err) {
         console.error("[ConvManager] Stream listener error:", err);
+      }
+    }
+  }
+
+  private emitListUpdate(): void {
+    const list = this.listProjectsAndConversations();
+    for (const listener of this.listListeners) {
+      try {
+        listener(list);
+      } catch (err) {
+        console.error("[ConvManager] List update listener error:", err);
       }
     }
   }
@@ -285,6 +309,8 @@ export class AntigravityConversationManager {
     this.activeConversationId = conversationId;
     this.startWatchingConversation(conversationId);
     const messages = this.getConversationMessages(conversationId);
+    // Notify all clients of new active conversation selection
+    this.emitListUpdate();
     return {
       success: true,
       conversationId,
@@ -293,7 +319,6 @@ export class AntigravityConversationManager {
   }
 
   public startWatchingConversation(conversationId: string): void {
-    // Clear existing watch
     if (this.activeWatchTimer) {
       clearInterval(this.activeWatchTimer);
       this.activeWatchTimer = null;
@@ -390,8 +415,8 @@ export class AntigravityConversationManager {
       }
     };
 
-    // Fast 350ms interval polling guarantees immediate responsive update on Windows
-    this.activeWatchTimer = setInterval(pollNewLines, 350);
+    // Fast 300ms interval polling guarantees live responsive output
+    this.activeWatchTimer = setInterval(pollNewLines, 300);
 
     try {
       this.activeFileWatcher = fs.watch(path.dirname(transcriptPath), (eventType, filename) => {
@@ -399,9 +424,47 @@ export class AntigravityConversationManager {
           pollNewLines();
         }
       });
-    } catch {
-      // fallback to polling timer
-    }
+    } catch {}
+  }
+
+  private startWatchingDatabase(): void {
+    const walFile = path.join(this.antigravityDir, "conversation_summaries.db-wal");
+
+    const checkDbMtime = () => {
+      let maxMtime = 0;
+      try {
+        if (fs.existsSync(this.dbPath)) {
+          maxMtime = Math.max(maxMtime, fs.statSync(this.dbPath).mtimeMs);
+        }
+        if (fs.existsSync(walFile)) {
+          maxMtime = Math.max(maxMtime, fs.statSync(walFile).mtimeMs);
+        }
+
+        if (this.lastDbMtime === 0) {
+          this.lastDbMtime = maxMtime;
+          return;
+        }
+
+        if (maxMtime > this.lastDbMtime) {
+          this.lastDbMtime = maxMtime;
+          if (this.debounceTimer) clearTimeout(this.debounceTimer);
+          this.debounceTimer = setTimeout(() => {
+            this.emitListUpdate();
+          }, 350);
+        }
+      } catch {}
+    };
+
+    // Fast 1000ms polling for SQLite WAL & DB changes
+    this.dbPollTimer = setInterval(checkDbMtime, 1000);
+
+    try {
+      this.dbWatcher = fs.watch(this.antigravityDir, (eventType, filename) => {
+        if (filename && filename.startsWith("conversation_summaries")) {
+          checkDbMtime();
+        }
+      });
+    } catch {}
   }
 
   public async createNewConversation(
@@ -455,6 +518,7 @@ export class AntigravityConversationManager {
       const topConv = list.projects[0]?.conversations[0];
       if (topConv) {
         this.setActiveConversation(topConv.id);
+        this.emitListUpdate();
         return {
           success: true,
           conversationId: topConv.id,
@@ -478,6 +542,18 @@ export class AntigravityConversationManager {
     if (this.activeFileWatcher) {
       this.activeFileWatcher.close();
       this.activeFileWatcher = null;
+    }
+    if (this.dbPollTimer) {
+      clearInterval(this.dbPollTimer);
+      this.dbPollTimer = null;
+    }
+    if (this.dbWatcher) {
+      this.dbWatcher.close();
+      this.dbWatcher = null;
+    }
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
     }
   }
 }

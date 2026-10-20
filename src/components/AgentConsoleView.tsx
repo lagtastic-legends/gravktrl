@@ -8,6 +8,7 @@ import {
   Square,
   Sparkles,
   CheckCircle2,
+  Check,
   Copy,
   Activity,
   MessageSquare,
@@ -20,12 +21,16 @@ import {
   X,
   BrainCircuit,
   ExternalLink,
+  Gauge,
+  Zap,
 } from "lucide-react";
 import type {
   GravKtrlClient,
   ProjectGroup,
   ConversationItem,
   ChatMessage,
+  ModelInfo,
+  ModelUsageData,
 } from "../lib/gravktrl-client";
 
 interface AgentConsoleViewProps {
@@ -47,6 +52,52 @@ const PRESET_PROMPTS = [
   { label: "Stage, Commit & Push", prompt: "Inspect git status and diff, format code, and make a clean atomic commit and push to remote." },
 ];
 
+const CircularGauge: React.FC<{
+  percent: number;
+  label: string;
+  resetText: string;
+  color?: string;
+}> = ({ percent, label, resetText, color = "stroke-indigo-600" }) => {
+  const radius = 28;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (percent / 100) * circumference;
+
+  return (
+    <div className="flex-1 flex flex-col items-center p-3 rounded-2xl bg-[#f6f8fb] shadow-neo-soft border border-white/80">
+      <div className="relative w-20 h-20 flex items-center justify-center">
+        <svg className="w-20 h-20 -rotate-90" viewBox="0 0 72 72">
+          {/* Background track circle */}
+          <circle
+            cx="36"
+            cy="36"
+            r={radius}
+            className="stroke-slate-200"
+            strokeWidth="5"
+            fill="none"
+          />
+          {/* Progress circle */}
+          <circle
+            cx="36"
+            cy="36"
+            r={radius}
+            className={`${color} transition-all duration-700 ease-out`}
+            strokeWidth="5"
+            strokeDasharray={circumference}
+            strokeDashoffset={strokeDashoffset}
+            strokeLinecap="round"
+            fill="none"
+          />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <span className="text-base font-black text-slate-800">{percent}%</span>
+        </div>
+      </div>
+      <span className="mt-2 text-[11px] font-bold text-slate-700 text-center leading-tight">{label}</span>
+      <span className="text-[10px] text-slate-400 font-mono mt-1">{resetText}</span>
+    </div>
+  );
+};
+
 export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, activeWorkspace }) => {
   const [prompt, setPrompt] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -55,6 +106,76 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
   const [showActivity, setShowActivity] = useState<boolean>(false);
   const [recentFiles, setRecentFiles] = useState<FileActivity[]>([]);
   
+  // Model Selection & Quota Limits State
+  const [showModelModal, setShowModelModal] = useState<boolean>(false);
+  const [modelViewTab, setModelViewTab] = useState<"models" | "usage">("models");
+  const [models, setModels] = useState<ModelInfo[]>([
+    {
+      id: "gemini-3.8-flash",
+      name: "Gemini 3.8 Flash",
+      tier: "High",
+      badge: "High",
+      group: "gemini",
+      isAvailable: true,
+      isSelected: true,
+      description: "Default fast multimodal model with extended thinking",
+    },
+    {
+      id: "claude-sonnet-4.6",
+      name: "Claude Sonnet 4.6",
+      tier: "Thinking",
+      badge: "Thinking",
+      group: "claude_gpt",
+      isAvailable: true,
+      isSelected: false,
+      description: "Anthropic's latest hybrid reasoning and code synthesis model",
+    },
+    {
+      id: "claude-opus-4.6",
+      name: "Claude Opus 4.6",
+      tier: "Thinking",
+      badge: "Thinking",
+      group: "claude_gpt",
+      isAvailable: true,
+      isSelected: false,
+      description: "Deep research, complex multi-file refactoring and architecture",
+    },
+    {
+      id: "gpt-oss-120b",
+      name: "GPT-OSS 120B",
+      tier: "Medium",
+      badge: "Medium",
+      group: "claude_gpt",
+      isAvailable: true,
+      isSelected: false,
+      description: "Open-weights high throughput reasoning model",
+    },
+    {
+      id: "gemini-4-argon",
+      name: "Gemini 4 Argon",
+      tier: "Unavailable",
+      badge: "Unavailable",
+      group: "gemini",
+      isAvailable: false,
+      isSelected: false,
+      notice: "Currently unavailable to new users",
+      description: "Next-generation preview model under private testing",
+    },
+  ]);
+  const [activeModelId, setActiveModelId] = useState<string>("gemini-3.8-flash");
+  const [modelUsage, setModelUsage] = useState<ModelUsageData>({
+    gemini: {
+      weekly: { remainingPercent: 72, resetFormatted: "Resets in 4d", resetTimestamp: 0 },
+      fiveHour: { remainingPercent: 89, resetFormatted: "Resets in 4h 4m", resetTimestamp: 0 },
+    },
+    claudeGpt: {
+      weekly: { remainingPercent: 100, resetFormatted: "Resets in 7d", resetTimestamp: 0 },
+      fiveHour: { remainingPercent: 100, resetFormatted: "Resets in 5h", resetTimestamp: 0 },
+    },
+    activeModelId: "gemini-3.8-flash",
+    lastUpdated: new Date().toISOString(),
+  });
+
   // Conversations Drawer & Selection State
   const [showConversationDrawer, setShowConversationDrawer] = useState<boolean>(false);
   const [projects, setProjects] = useState<ProjectGroup[]>([]);
@@ -126,6 +247,20 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
     // Initial data load
     loadConversations();
 
+    // Fetch initial models & quota usage
+    client.listModels()
+      .then((res) => {
+        if (res && res.models) {
+          setModels(res.models);
+          const active = res.models.find((m) => m.isSelected);
+          if (active) setActiveModelId(active.id);
+        }
+        if (res && res.usage) {
+          setModelUsage(res.usage);
+        }
+      })
+      .catch(() => {});
+
     // Check agent process status
     client.getAgentStatus()
       .then((st) => {
@@ -142,6 +277,36 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
         }
       })
       .catch(() => {});
+
+    // Subscribe to real-time conversation and project list updates
+    const unsubConvs = client.on("conversation.listUpdated", (data: any) => {
+      if (data && data.projects) {
+        setProjects(data.projects);
+        if (data.activeConversationId) {
+          setActiveConversationId(data.activeConversationId);
+          for (const p of data.projects) {
+            const found = p.conversations?.find((c: any) => c.id === data.activeConversationId);
+            if (found) {
+              setActiveConversation(found);
+              break;
+            }
+          }
+        }
+      }
+    });
+
+    // Subscribe to real-time model quota updates
+    const unsubUsage = client.on("model.usageUpdated", (data: any) => {
+      if (data) {
+        setModelUsage(data);
+        if (data.activeModelId) {
+          setActiveModelId(data.activeModelId);
+          setModels((prev) =>
+            prev.map((m) => ({ ...m, isSelected: m.id === data.activeModelId }))
+          );
+        }
+      }
+    });
 
     // Subscribe to live agent streaming chunks & thoughts
     const unsubStream = client.on("agent.streamChunk", (chunk: any) => {
@@ -216,6 +381,8 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
     return () => {
       unsubStream();
       unsubFiles();
+      unsubConvs();
+      unsubUsage();
     };
   }, [client]);
 
@@ -225,6 +392,23 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, agentStatus]);
+
+  const handleSelectModel = async (model: ModelInfo) => {
+    if (!model.isAvailable) return;
+    try {
+      setActiveModelId(model.id);
+      setModels((prev) =>
+        prev.map((m) => ({
+          ...m,
+          isSelected: m.id === model.id,
+        }))
+      );
+      await client.selectModel(model.id);
+      setShowModelModal(false);
+    } catch (e) {
+      console.warn("[AgentConsole] Failed to select model:", e);
+    }
+  };
 
   const handleSelectConversation = async (conv: ConversationItem) => {
     try {
@@ -454,11 +638,40 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
         </div>
 
         {/* Status Strip & Mode Badges */}
-        <div className="flex items-center justify-between border-t border-slate-100 pt-2">
+        <div className="flex items-center justify-between border-t border-slate-100 pt-2 gap-1.5 flex-wrap">
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-              Gemini 3.8 Flash
-            </span>
+            {/* Model Selector Chip */}
+            <button
+              type="button"
+              onClick={() => {
+                setModelViewTab("models");
+                setShowModelModal(true);
+              }}
+              className="h-7 px-2 rounded-xl bg-white shadow-neo-soft hover:shadow-neo-pressed active:shadow-neo-pressed border border-white/80 flex items-center gap-1.5 text-[10px] font-bold text-slate-800 transition-all group"
+              title="Change Antigravity AI Model & View Quota Limits"
+            >
+              <Sparkles className="w-3 h-3 text-indigo-600 shrink-0" />
+              <span className="truncate max-w-[100px]">{models.find((m) => m.isSelected)?.name || "Gemini 3.8 Flash"}</span>
+              <span className="px-1.5 py-0.2 rounded-full bg-indigo-50 text-indigo-600 text-[9px] font-mono">
+                {models.find((m) => m.isSelected)?.tier || "High"}
+              </span>
+              <ChevronDown className="w-3 h-3 text-slate-400 group-hover:text-indigo-600 transition-colors shrink-0" />
+            </button>
+
+            {/* View Usage Quick Access Pill */}
+            <button
+              type="button"
+              onClick={() => {
+                setModelViewTab("usage");
+                setShowModelModal(true);
+              }}
+              className="h-7 px-2 rounded-xl bg-white shadow-neo-soft hover:shadow-neo-pressed active:shadow-neo-pressed border border-white/80 flex items-center gap-1 text-[10px] font-bold text-slate-600 hover:text-indigo-600 transition-all"
+              title="View Antigravity Usage Limits & Quota Rings"
+            >
+              <Gauge className="w-3 h-3 text-indigo-600 shrink-0" />
+              <span>{modelUsage.gemini.weekly.remainingPercent}%</span>
+            </button>
+
             <span className="text-slate-300">•</span>
             {attachMode === "cdp" ? (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9px] font-bold">
@@ -468,7 +681,7 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
             ) : attachMode === "win32" ? (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-[9px] font-bold">
                 <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
-                WIN32 PROCESS
+                WIN32
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[9px] font-bold">
@@ -581,7 +794,7 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
                   ) : (
                     <>
                       <Sparkles className="w-3 h-3 text-indigo-600" />
-                      GEMINI 3.8 FLASH
+                      {(models.find((m) => m.isSelected)?.name || "Gemini 3.8 Flash").toUpperCase()}
                     </>
                   )}
                 </span>
@@ -834,6 +1047,197 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
                 Refresh List
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 7. SILK NEOMORPHIC MODEL PICKER & VIEW USAGE MODAL (Matching User Image media_1792466156747_9b5426d8.png) */}
+      {showModelModal && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end sm:justify-center bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full sm:max-w-md mx-auto max-h-[85vh] bg-[#f6f8fb] rounded-t-3xl sm:rounded-3xl shadow-2xl border border-white/80 flex flex-col overflow-hidden animate-in slide-in-from-bottom">
+            {/* Modal Header */}
+            <div className="p-4 bg-white/80 border-b border-slate-200/60 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                {modelViewTab === "usage" ? (
+                  <button
+                    type="button"
+                    onClick={() => setModelViewTab("models")}
+                    className="h-8 px-2.5 rounded-xl bg-white shadow-neo-soft flex items-center gap-1 text-xs font-bold text-slate-700 hover:text-indigo-600 active:shadow-neo-pressed transition-all mr-1"
+                  >
+                    <span>‹</span>
+                    <span>Models</span>
+                  </button>
+                ) : (
+                  <div className="w-8 h-8 rounded-xl bg-indigo-50 shadow-neo-soft flex items-center justify-center text-indigo-600">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                )}
+                <div className="flex flex-col">
+                  <span className="font-extrabold text-sm text-slate-800">
+                    {modelViewTab === "models" ? "Model" : "Model Usage & Limits"}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    {modelViewTab === "models" ? "Select reasoning engine for Antigravity" : "Real-time quota limits from PC"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {modelViewTab === "models" && (
+                  <button
+                    type="button"
+                    onClick={() => setModelViewTab("usage")}
+                    className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-0.5 px-2 py-1 rounded-lg hover:bg-indigo-50 transition-colors"
+                  >
+                    <span>View Usage</span>
+                    <span>›</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowModelModal(false)}
+                  className="w-8 h-8 rounded-full bg-white shadow-neo-soft flex items-center justify-center text-slate-500 hover:text-slate-800 active:shadow-neo-pressed transition-all"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            {modelViewTab === "models" ? (
+              <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                {models.map((m) => {
+                  const isSelected = m.id === activeModelId;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      disabled={!m.isAvailable}
+                      onClick={() => handleSelectModel(m)}
+                      className={`w-full p-3 rounded-2xl flex items-center justify-between transition-all border text-left ${
+                        !m.isAvailable
+                          ? "opacity-60 cursor-not-allowed bg-slate-50 border-slate-200/50"
+                          : isSelected
+                          ? "bg-indigo-50/70 border-indigo-200 shadow-sm"
+                          : "bg-white shadow-neo-soft hover:shadow-neo-pressed border-white/80"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-5 h-5 flex items-center justify-center shrink-0">
+                          {isSelected ? (
+                            <Check className="w-4 h-4 text-indigo-600 stroke-[3]" />
+                          ) : (
+                            <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                          )}
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <span className={`text-xs font-bold ${isSelected ? "text-indigo-950" : "text-slate-800"}`}>
+                            {m.name}
+                          </span>
+                          {m.notice ? (
+                            <span className="text-[10px] text-amber-600 font-medium">{m.notice}</span>
+                          ) : (
+                            <span className="text-[10px] text-slate-400 truncate">{m.description}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="shrink-0 ml-2">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                            m.badge === "High"
+                              ? "bg-indigo-100/70 text-indigo-700"
+                              : m.badge === "Thinking"
+                              ? "bg-purple-100/70 text-purple-700"
+                              : m.badge === "Medium"
+                              ? "bg-sky-100/70 text-sky-700"
+                              : "bg-slate-100 text-slate-500"
+                          }`}
+                        >
+                          {m.badge}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+
+                {/* Bottom Quick Switch to Usage View */}
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setModelViewTab("usage")}
+                    className="w-full h-10 rounded-2xl bg-white shadow-neo-soft hover:shadow-neo-pressed active:shadow-neo-pressed border border-white/80 text-xs font-bold text-slate-700 flex items-center justify-between px-4 transition-all"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Gauge className="w-4 h-4 text-indigo-600" />
+                      <span>View Usage Quotas & Limits</span>
+                    </div>
+                    <span className="text-indigo-600 font-black">›</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Usage Tab View: Matching User's Image Exact Circular Progress Meters */
+              <div className="flex-1 overflow-y-auto p-3 space-y-4">
+                {/* 1. Gemini Models */}
+                <div className="p-3.5 rounded-2xl bg-white shadow-neo-flat border border-white/80 space-y-3">
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                      Gemini Models
+                    </span>
+                    <span className="text-[10px] text-emerald-600 font-mono font-bold flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      ACTIVE
+                    </span>
+                  </div>
+                  <div className="flex items-stretch gap-2.5">
+                    <CircularGauge
+                      percent={modelUsage.gemini.weekly.remainingPercent}
+                      label="Weekly Limit Remaining"
+                      resetText={modelUsage.gemini.weekly.resetFormatted}
+                      color="stroke-indigo-600"
+                    />
+                    <CircularGauge
+                      percent={modelUsage.gemini.fiveHour.remainingPercent}
+                      label="Five Hour Limit Remaining"
+                      resetText={modelUsage.gemini.fiveHour.resetFormatted}
+                      color="stroke-cyan-500"
+                    />
+                  </div>
+                </div>
+
+                {/* 2. Claude and GPT models */}
+                <div className="p-3.5 rounded-2xl bg-white shadow-neo-flat border border-white/80 space-y-3">
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                      <BrainCircuit className="w-3.5 h-3.5 text-purple-600" />
+                      Claude and GPT models
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono">STANDBY</span>
+                  </div>
+                  <div className="flex items-stretch gap-2.5">
+                    <CircularGauge
+                      percent={modelUsage.claudeGpt.weekly.remainingPercent}
+                      label="Weekly Limit Remaining"
+                      resetText={modelUsage.claudeGpt.weekly.resetFormatted}
+                      color="stroke-purple-600"
+                    />
+                    <CircularGauge
+                      percent={modelUsage.claudeGpt.fiveHour.remainingPercent}
+                      label="Five Hour Limit Remaining"
+                      resetText={modelUsage.claudeGpt.fiveHour.resetFormatted}
+                      color="stroke-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Real-time Indicator Footer */}
+                <div className="p-2.5 rounded-xl neo-well flex items-center gap-2 text-[10px] text-slate-500 font-mono">
+                  <Zap className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <span>Real-time quota updates every 15s & on every prompt execution</span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
