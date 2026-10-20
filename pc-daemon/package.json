@@ -1,6 +1,6 @@
 {
   "name": "gravktrl-pc-daemon",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "GravKtrl PC Host Daemon - CDP Controller, Terminal Engine, and JSON-RPC Bridge",
   "main": "dist/server.js",
   "scripts": {

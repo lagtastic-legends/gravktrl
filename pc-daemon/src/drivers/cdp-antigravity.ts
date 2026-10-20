@@ -295,12 +295,12 @@ export class CdpAntigravityDriver implements AgentDriver {
       const win32Res = await this.win32Bridge.injectPromptViaWin32(prompt, activeWorkspace);
       if (win32Res.success) {
         this.emitStreamChunk({
-          text: `[Win32 Attached: Normal Process]\nInjected prompt into "${win32Res.windowTitle || procInfo.mainWindowTitle}"\n> ${prompt}\n\nAntigravity is now processing your request. Live file modifications will stream here in real time.`,
-          isComplete: true,
-          status: "dispatched",
+          text: `[Win32 Attached: Normal Process]\nInjected prompt into "${win32Res.windowTitle || procInfo.mainWindowTitle}"\n> ${prompt}\n\nAntigravity is now processing your request. Live thoughts and responses will stream here directly...`,
+          isComplete: false,
+          status: "running",
         });
 
-        this.isAgentActive = false;
+        this.isAgentActive = true;
         return {
           success: true,
           mode: "win32",

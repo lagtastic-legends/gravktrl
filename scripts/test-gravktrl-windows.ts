@@ -119,6 +119,54 @@ async function runWindowsSuite() {
     }
     console.log(`      workspace.recentActivity verified: ${recentResult.recentFiles.length} file history entries`);
 
+    // 7. Test conversation.list & conversation.getMessages JSON-RPC
+    console.log("[7/7] Testing JSON-RPC conversation.list and conversation.getMessages...");
+    const convListPromise = new Promise<any>((resolve, reject) => {
+      const id = 1002;
+      const handler = (raw: any) => {
+        try {
+          const res = JSON.parse(raw.toString());
+          if (res.id === id) {
+            ws.removeListener("message", handler);
+            resolve(res.result);
+          }
+        } catch {}
+      };
+      ws.on("message", handler);
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id, method: "conversation.list", params: {} }));
+      setTimeout(() => reject(new Error("RPC conversation.list timed out")), 4000);
+    });
+
+    const convList = await convListPromise;
+    if (!convList || !Array.isArray(convList.projects)) {
+      throw new Error("Invalid conversation.list response: " + JSON.stringify(convList));
+    }
+    console.log(`      conversation.list verified: ${convList.projects.length} project groups, activeId=${convList.activeConversationId || "none"}`);
+
+    if (convList.activeConversationId) {
+      const convMsgsPromise = new Promise<any>((resolve, reject) => {
+        const id = 1003;
+        const handler = (raw: any) => {
+          try {
+            const res = JSON.parse(raw.toString());
+            if (res.id === id) {
+              ws.removeListener("message", handler);
+              resolve(res.result);
+            }
+          } catch {}
+        };
+        ws.on("message", handler);
+        ws.send(JSON.stringify({ jsonrpc: "2.0", id, method: "conversation.getMessages", params: { conversationId: convList.activeConversationId, limit: 10 } }));
+        setTimeout(() => reject(new Error("RPC conversation.getMessages timed out")), 4000);
+      });
+
+      const convMsgs = await convMsgsPromise;
+      if (!convMsgs || !Array.isArray(convMsgs.messages)) {
+        throw new Error("Invalid conversation.getMessages response: " + JSON.stringify(convMsgs));
+      }
+      console.log(`      conversation.getMessages verified: retrieved ${convMsgs.messages.length} messages for active conversation`);
+    }
+
     ws.close();
     console.log("\n==================================================================");
     console.log("  ✓ ALL TESTS PASSED! GRAVKTRL WINDOWS APP & DUAL DRIVER ARE READY");

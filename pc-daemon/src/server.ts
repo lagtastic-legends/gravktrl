@@ -9,6 +9,7 @@ import { CdpAntigravityDriver } from "./drivers/cdp-antigravity.js";
 import { TerminalEngineDriver } from "./drivers/terminal-engine.js";
 import { GitEngineDriver } from "./drivers/git-engine.js";
 import { WorkspaceWatcher } from "./drivers/workspace-watcher.js";
+import { AntigravityConversationManager } from "./drivers/antigravity-conversation-manager.js";
 import { renderDesktopHtml } from "./desktop-ui.js";
 
 export interface JsonRpcRequest {
@@ -72,6 +73,7 @@ export class GravKtrlServer {
   private telemetry: TelemetryCollector;
   private workspaceManager: WorkspaceManager;
   private workspaceWatcher: WorkspaceWatcher;
+  private conversationManager: AntigravityConversationManager;
   private authenticatedSockets: Set<WebSocket> = new Set();
 
   private agentDriver?: AgentDriver;
@@ -84,9 +86,14 @@ export class GravKtrlServer {
     this.telemetry = new TelemetryCollector();
     this.workspaceManager = new WorkspaceManager(baseDir);
     this.workspaceWatcher = new WorkspaceWatcher(this.workspaceManager.getActiveWorkspace());
+    this.conversationManager = new AntigravityConversationManager();
 
     this.workspaceWatcher.onFileChange((event) => {
       this.broadcastNotification("agent.fileModified", event as unknown as Record<string, unknown>);
+    });
+
+    this.conversationManager.onStream((event) => {
+      this.broadcastNotification("agent.streamChunk", event.chunk);
     });
 
     this.httpServer = http.createServer((req, res) => this.handleHttpRequest(req, res));
@@ -536,6 +543,41 @@ export class GravKtrlServer {
           };
         }
 
+        // CONVERSATIONS & CHAT (Antigravity Native Transcript & Projects)
+        case "conversation.list": {
+          const data = this.conversationManager.listProjectsAndConversations();
+          return { jsonrpc: "2.0", id, result: data };
+        }
+
+        case "conversation.getMessages": {
+          const convId = (params.conversationId as string) || this.conversationManager.getActiveConversationId();
+          if (!convId) {
+            return { jsonrpc: "2.0", id, result: { messages: [] } };
+          }
+          const limit = (params.limit as number) || 50;
+          const messages = this.conversationManager.getConversationMessages(convId, limit);
+          return { jsonrpc: "2.0", id, result: { conversationId: convId, messages } };
+        }
+
+        case "conversation.select": {
+          const convId = params.conversationId as string;
+          if (!convId) {
+            return {
+              jsonrpc: "2.0",
+              id,
+              error: { code: -32602, message: "Missing required parameter: conversationId" },
+            };
+          }
+          const selected = this.conversationManager.setActiveConversation(convId);
+          return { jsonrpc: "2.0", id, result: selected };
+        }
+
+        case "conversation.new": {
+          const projId = params.projectId as string | undefined;
+          const created = await this.conversationManager.createNewConversation(projId, (this.agentDriver as any)?.getWin32Bridge?.());
+          return { jsonrpc: "2.0", id, result: created };
+        }
+
         // AGENT (CDP Bridge & Inbox Fallback)
         case "agent.sendPrompt": {
           const prompt = params.prompt as string;
@@ -553,7 +595,21 @@ export class GravKtrlServer {
               error: { code: -32003, message: "Agent driver not initialized" },
             };
           }
+
+          // Ensure active conversation is watched for immediate live output streaming
+          const activeConv = this.conversationManager.getActiveConversationId();
+          if (activeConv) {
+            this.conversationManager.startWatchingConversation(activeConv);
+          }
+
           const res = await this.agentDriver.sendPrompt(prompt, activeWs);
+
+          // If a conversation was created or changed, re-sync watcher
+          const latestConvs = this.conversationManager.listProjectsAndConversations();
+          if (latestConvs.activeConversationId) {
+            this.conversationManager.startWatchingConversation(latestConvs.activeConversationId);
+          }
+
           return { jsonrpc: "2.0", id, result: res };
         }
 

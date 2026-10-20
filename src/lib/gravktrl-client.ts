@@ -63,6 +63,36 @@ export interface ApprovalRequest {
   riskReason: string;
 }
 
+export interface ConversationItem {
+  id: string;
+  title: string;
+  preview: string;
+  lastModified: string;
+  relativeTime: string;
+  isActive: boolean;
+  stepCount: number;
+  workspacePath?: string;
+  projectName: string;
+  projectId: string;
+}
+
+export interface ProjectGroup {
+  id: string;
+  name: string;
+  workspacePath?: string;
+  conversations: ConversationItem[];
+}
+
+export interface ChatMessage {
+  id: string;
+  sender: "user" | "agent";
+  text: string;
+  thinking?: string;
+  timestamp: string;
+  stepIndex: number;
+  status?: string;
+}
+
 export type ConnectionState = "disconnected" | "connecting" | "connected" | "authenticated" | "error";
 
 type EventCallback<T = unknown> = (data: T) => void;
@@ -486,6 +516,23 @@ export class GravKtrlClient {
     recentFiles: Array<{ file: string; action: "created" | "modified" | "deleted"; size?: number; timestamp: string }>;
   }> {
     return this.call("workspace.recentActivity");
+  }
+
+  // --- Antigravity Conversations & History ---
+  public listConversations(): Promise<{ projects: ProjectGroup[]; activeConversationId: string | null }> {
+    return this.call("conversation.list");
+  }
+
+  public getConversationMessages(conversationId?: string, limit?: number): Promise<{ conversationId: string; messages: ChatMessage[] }> {
+    return this.call("conversation.getMessages", { conversationId, limit });
+  }
+
+  public selectConversation(conversationId: string): Promise<{ success: boolean; conversationId: string; messages: ChatMessage[] }> {
+    return this.call("conversation.select", { conversationId });
+  }
+
+  public createConversation(projectId?: string): Promise<{ success: boolean; conversationId?: string; message: string }> {
+    return this.call("conversation.new", { projectId });
   }
 
   public executeTerminal(
