@@ -1,6 +1,6 @@
 {
   "name": "gravktrl",
-  "version": "1.2.3",
+  "version": "1.3.0",
   "description": "GravKtrl - Mobile-to-PC Remote Agent Commander & Terminal Bridge",
   "private": true,
   "scripts": {

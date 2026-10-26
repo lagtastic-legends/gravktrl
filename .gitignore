@@ -16,6 +16,7 @@ android/.gradle/
 android/local.properties
 *.apk
 *.aab
+*.exe
 
 # Local Auth & Workspace configs (Zero Secret Leakage)
 .gravktrl-auth.json

@@ -124,6 +124,32 @@ export interface ModelUsageData {
   lastUpdated: string;
 }
 
+export interface ScreenInfo {
+  screenWidth: number;
+  screenHeight: number;
+  antigravity: {
+    found: boolean;
+    hWnd: number;
+    title: string;
+    rect: {
+      left: number;
+      top: number;
+      width: number;
+      height: number;
+    };
+  };
+}
+
+export interface ScreenInputEvent {
+  type: "click" | "right_click" | "double_click" | "scroll" | "text" | "focus";
+  normX?: number;
+  normY?: number;
+  deltaY?: number;
+  text?: string;
+  button?: "left" | "right" | "double";
+  target?: "desktop" | "antigravity";
+}
+
 export type ConnectionState = "disconnected" | "connecting" | "connected" | "authenticated" | "error";
 
 type EventCallback<T = unknown> = (data: T) => void;
@@ -577,6 +603,48 @@ export class GravKtrlClient {
 
   public selectModel(modelId: string): Promise<{ success: boolean; model?: ModelInfo; message: string }> {
     return this.call("model.select", { modelId });
+  }
+
+  // --- Remote Screen Mirroring & PC Control ---
+  public getScreenInfo(): Promise<ScreenInfo> {
+    return this.call<ScreenInfo>("screen.info");
+  }
+
+  public captureScreenShot(
+    target: "desktop" | "antigravity" = "antigravity",
+    quality: number = 75,
+    scale: number = 1.0
+  ): Promise<{ target: string; format: string; sizeBytes: number; imageBase64: string }> {
+    return this.call("screen.capture", { target, quality, scale });
+  }
+
+  public sendScreenInput(event: ScreenInputEvent): Promise<{ success: boolean; message?: string }> {
+    return this.call("screen.input", event as unknown as Record<string, unknown>);
+  }
+
+  public getScreenStreamUrl(
+    target: "desktop" | "antigravity" = "antigravity",
+    fps: number = 10,
+    quality: number = 60,
+    scale: number = 0.75
+  ): string {
+    const profile = this.getCurrentProfile();
+    const host = profile?.host || (typeof window !== "undefined" ? window.location.hostname : "127.0.0.1");
+    const port = profile?.port || 8787;
+    const token = profile?.token || "";
+    return `http://${host}:${port}/api/screen/stream?token=${encodeURIComponent(token)}&target=${target}&fps=${fps}&quality=${quality}&scale=${scale}`;
+  }
+
+  public getScreenShotUrl(
+    target: "desktop" | "antigravity" = "antigravity",
+    quality: number = 75,
+    scale: number = 1.0
+  ): string {
+    const profile = this.getCurrentProfile();
+    const host = profile?.host || (typeof window !== "undefined" ? window.location.hostname : "127.0.0.1");
+    const port = profile?.port || 8787;
+    const token = profile?.token || "";
+    return `http://${host}:${port}/api/screen/shot?token=${encodeURIComponent(token)}&target=${target}&quality=${quality}&scale=${scale}&_t=${Date.now()}`;
   }
 
   public executeTerminal(

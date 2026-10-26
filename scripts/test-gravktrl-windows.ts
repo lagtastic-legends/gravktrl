@@ -233,6 +233,87 @@ async function runWindowsSuite() {
     await reselectPromise;
     console.log("      model.select reset back to Gemini 3.8 Flash cleanly.");
 
+    // 9. Test Screen Mirroring & Remote Input (screen.info, screen.capture, /api/screen/shot, screen.input)
+    console.log("[9/9] Testing Remote Screen Mirroring & Input Injection...");
+    const screenInfoPromise = new Promise<any>((resolve, reject) => {
+      const id = 1007;
+      const handler = (raw: any) => {
+        try {
+          const res = JSON.parse(raw.toString());
+          if (res.id === id) {
+            ws.removeListener("message", handler);
+            resolve(res.result);
+          }
+        } catch {}
+      };
+      ws.on("message", handler);
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id, method: "screen.info", params: {} }));
+      setTimeout(() => reject(new Error("RPC screen.info timed out")), 4000);
+    });
+
+    const screenInfo = await screenInfoPromise;
+    if (!screenInfo || typeof screenInfo.screenWidth !== "number" || screenInfo.screenWidth <= 0) {
+      throw new Error("Invalid screen.info response: " + JSON.stringify(screenInfo));
+    }
+    console.log(`      screen.info verified: resolution ${screenInfo.screenWidth}x${screenInfo.screenHeight}, antigravityFound=${screenInfo.antigravity?.found}`);
+
+    // Test JSON-RPC screen.capture
+    const screenCapturePromise = new Promise<any>((resolve, reject) => {
+      const id = 1008;
+      const handler = (raw: any) => {
+        try {
+          const res = JSON.parse(raw.toString());
+          if (res.id === id) {
+            ws.removeListener("message", handler);
+            resolve(res.result);
+          }
+        } catch {}
+      };
+      ws.on("message", handler);
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id, method: "screen.capture", params: { target: "desktop", quality: 60 } }));
+      setTimeout(() => reject(new Error("RPC screen.capture timed out")), 4000);
+    });
+
+    const screenCapture = await screenCapturePromise;
+    if (!screenCapture || !screenCapture.imageBase64 || screenCapture.sizeBytes <= 0) {
+      throw new Error("Invalid screen.capture response: " + JSON.stringify(screenCapture));
+    }
+    console.log(`      screen.capture verified: captured ${screenCapture.sizeBytes} bytes JPEG base64`);
+
+    // Test HTTP GET /api/screen/shot
+    const shotRes = await fetch(`http://127.0.0.1:${TEST_PORT}/api/screen/shot?token=${masterToken}&target=desktop&quality=50`);
+    if (!shotRes.ok) {
+      throw new Error(`GET /api/screen/shot returned status ${shotRes.status}`);
+    }
+    const shotBuf = await shotRes.arrayBuffer();
+    if (shotBuf.byteLength < 500) {
+      throw new Error(`GET /api/screen/shot returned payload too small: ${shotBuf.byteLength} bytes`);
+    }
+    console.log(`      GET /api/screen/shot verified: ${shotBuf.byteLength} bytes binary JPEG`);
+
+    // Test JSON-RPC screen.input (normalized click injection)
+    const screenInputPromise = new Promise<any>((resolve, reject) => {
+      const id = 1009;
+      const handler = (raw: any) => {
+        try {
+          const res = JSON.parse(raw.toString());
+          if (res.id === id) {
+            ws.removeListener("message", handler);
+            resolve(res.result);
+          }
+        } catch {}
+      };
+      ws.on("message", handler);
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id, method: "screen.input", params: { type: "click", normX: 0.5, normY: 0.5 } }));
+      setTimeout(() => reject(new Error("RPC screen.input timed out")), 4000);
+    });
+
+    const inputResult = await screenInputPromise;
+    if (!inputResult || !inputResult.success) {
+      throw new Error("screen.input failed: " + JSON.stringify(inputResult));
+    }
+    console.log(`      screen.input verified: remote touch/click injected successfully`);
+
     ws.close();
     console.log("\n==================================================================");
     console.log("  ✓ ALL TESTS PASSED! GRAVKTRL WINDOWS APP & DUAL DRIVER ARE READY");

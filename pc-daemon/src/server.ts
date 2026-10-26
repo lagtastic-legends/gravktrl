@@ -11,6 +11,7 @@ import { GitEngineDriver } from "./drivers/git-engine.js";
 import { WorkspaceWatcher } from "./drivers/workspace-watcher.js";
 import { AntigravityConversationManager } from "./drivers/antigravity-conversation-manager.js";
 import { ModelManager, type ModelUsageData, type ModelInfo } from "./drivers/model-manager.js";
+import { ScreenMirrorDriver, type ScreenInfo, type ScreenInputEvent } from "./drivers/screen-mirror-driver.js";
 import { renderDesktopHtml } from "./desktop-ui.js";
 
 export interface JsonRpcRequest {
@@ -76,6 +77,7 @@ export class GravKtrlServer {
   private workspaceWatcher: WorkspaceWatcher;
   private conversationManager: AntigravityConversationManager;
   private modelManager: ModelManager;
+  private screenMirror: ScreenMirrorDriver;
   private authenticatedSockets: Set<WebSocket> = new Set();
 
   private agentDriver?: AgentDriver;
@@ -90,6 +92,7 @@ export class GravKtrlServer {
     this.workspaceWatcher = new WorkspaceWatcher(this.workspaceManager.getActiveWorkspace());
     this.conversationManager = new AntigravityConversationManager();
     this.modelManager = new ModelManager(baseDir);
+    this.screenMirror = new ScreenMirrorDriver(baseDir);
 
     this.workspaceWatcher.onFileChange((event) => {
       this.broadcastNotification("agent.fileModified", event as unknown as Record<string, unknown>);
@@ -399,6 +402,60 @@ export class GravKtrlServer {
       }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ success: true, message: "Launch signaled" }));
+      return;
+    }
+
+    // Remote PC Screen & Antigravity Live Stream: GET /api/screen/stream
+    if (req.method === "GET" && (pathname === "/api/screen/stream" || pathname === "/api/screen/stream/")) {
+      const token =
+        reqUrl.searchParams.get("token") ||
+        (req.headers["x-gravktrl-token"] as string) ||
+        (req.headers.authorization ? req.headers.authorization.replace(/^Bearer\s+/i, "") : "");
+
+      if (!this.auth.verifyToken(token)) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Unauthorized: Invalid Pairing Token" }));
+        return;
+      }
+
+      const target = (reqUrl.searchParams.get("target") as "desktop" | "antigravity") || "antigravity";
+      const fps = parseInt(reqUrl.searchParams.get("fps") || "10", 10);
+      const quality = parseInt(reqUrl.searchParams.get("quality") || "60", 10);
+      const scale = parseFloat(reqUrl.searchParams.get("scale") || "0.75");
+
+      this.screenMirror.addStreamClient(res, target, fps, quality, scale);
+      return;
+    }
+
+    // Single Screen Snapshot: GET /api/screen/shot
+    if (req.method === "GET" && pathname === "/api/screen/shot") {
+      const token =
+        reqUrl.searchParams.get("token") ||
+        (req.headers["x-gravktrl-token"] as string) ||
+        (req.headers.authorization ? req.headers.authorization.replace(/^Bearer\s+/i, "") : "");
+
+      if (!this.auth.verifyToken(token)) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Unauthorized: Invalid Pairing Token" }));
+        return;
+      }
+
+      const target = (reqUrl.searchParams.get("target") as "desktop" | "antigravity") || "antigravity";
+      const quality = parseInt(reqUrl.searchParams.get("quality") || "75", 10);
+      const scale = parseFloat(reqUrl.searchParams.get("scale") || "1.0");
+
+      try {
+        const frame = await this.screenMirror.captureFrame(target, quality, scale);
+        res.writeHead(200, {
+          "Content-Type": "image/jpeg",
+          "Content-Length": frame.length,
+          "Cache-Control": "no-cache",
+        });
+        res.end(frame);
+      } catch (err: any) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message || "Failed to capture frame" }));
+      }
       return;
     }
 
@@ -816,6 +873,35 @@ export class GravKtrlServer {
           return { jsonrpc: "2.0", id, result: res };
         }
 
+        // REMOTE SCREEN MIRRORING & INPUT INJECTION
+        case "screen.info": {
+          const info = await this.screenMirror.getScreenInfo();
+          return { jsonrpc: "2.0", id, result: info };
+        }
+
+        case "screen.capture": {
+          const target = (params.target as "desktop" | "antigravity") || "antigravity";
+          const quality = (params.quality as number) || 75;
+          const scale = (params.scale as number) || 1.0;
+          const frame = await this.screenMirror.captureFrame(target, quality, scale);
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              target,
+              format: "image/jpeg",
+              sizeBytes: frame.length,
+              imageBase64: frame.toString("base64"),
+            },
+          };
+        }
+
+        case "screen.input": {
+          const inputEvent = params as unknown as ScreenInputEvent;
+          const res = await this.screenMirror.injectInput(inputEvent);
+          return { jsonrpc: "2.0", id, result: res };
+        }
+
         default:
           return {
             jsonrpc: "2.0",
@@ -846,6 +932,7 @@ export class GravKtrlServer {
     this.workspaceWatcher.stop();
     this.conversationManager.dispose();
     this.modelManager.dispose();
+    this.screenMirror.dispose();
     return new Promise((resolve) => {
       for (const socket of this.authenticatedSockets) {
         try {

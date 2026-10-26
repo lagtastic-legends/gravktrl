@@ -18,8 +18,9 @@ import { AgentConsoleView } from "@/components/AgentConsoleView";
 import { TerminalDeckView } from "@/components/TerminalDeckView";
 import { GitWorkspaceView } from "@/components/GitWorkspaceView";
 import { HostPairingView } from "@/components/HostPairingView";
+import { ScreenMirrorView } from "@/components/ScreenMirrorView";
 
-type ActiveTab = "agent" | "terminal" | "git" | "host";
+type ActiveTab = "agent" | "terminal" | "git" | "host" | "screen";
 
 export default function GravKtrlApp() {
   const [client] = useState(() => getGravKtrlClient());
@@ -337,7 +338,11 @@ export default function GravKtrlApp() {
         {(posture === "phone-slab" || posture === "cover-compact") && (
           <div className="h-full w-full max-w-lg mx-auto overflow-y-auto">
             {activeTab === "agent" && (
-              <AgentConsoleView client={client} activeWorkspace={activeWorkspace} />
+              <AgentConsoleView
+                client={client}
+                activeWorkspace={activeWorkspace}
+                onNavigateToScreen={() => setActiveTab("screen")}
+              />
             )}
             {activeTab === "terminal" && (
               <TerminalDeckView client={client} activeWorkspace={activeWorkspace} />
@@ -363,6 +368,9 @@ export default function GravKtrlApp() {
                 onOpenOnboarding={() => setShowOnboarding(true)}
               />
             )}
+            {activeTab === "screen" && (
+              <ScreenMirrorView client={client} activeWorkspace={activeWorkspace} />
+            )}
           </div>
         )}
 
@@ -371,8 +379,15 @@ export default function GravKtrlApp() {
           <div className="flex flex-col h-full w-full">
             {/* Top Display */}
             <div className="h-[48%] overflow-hidden relative border-b border-slate-200 bg-white shadow-neo-soft">
+              {activeTab === "screen" && (
+                <ScreenMirrorView client={client} activeWorkspace={activeWorkspace} />
+              )}
               {activeTab === "agent" && (
-                <AgentConsoleView client={client} activeWorkspace={activeWorkspace} />
+                <AgentConsoleView
+                client={client}
+                activeWorkspace={activeWorkspace}
+                onNavigateToScreen={() => setActiveTab("screen")}
+              />
               )}
               {activeTab === "host" && (
                 <HostPairingView
@@ -385,8 +400,12 @@ export default function GravKtrlApp() {
                   onOpenOnboarding={() => setShowOnboarding(true)}
                 />
               )}
-              {activeTab !== "agent" && activeTab !== "host" && (
-                <AgentConsoleView client={client} activeWorkspace={activeWorkspace} />
+              {activeTab !== "agent" && activeTab !== "host" && activeTab !== "screen" && (
+                <AgentConsoleView
+                client={client}
+                activeWorkspace={activeWorkspace}
+                onNavigateToScreen={() => setActiveTab("screen")}
+              />
               )}
             </div>
 
@@ -473,7 +492,11 @@ export default function GravKtrlApp() {
         {posture === "fold-dual" && (
           <div className="flex h-full w-full">
             <div className="flex-1 min-w-0 h-full overflow-hidden border-r border-slate-200 bg-white">
-              <AgentConsoleView client={client} activeWorkspace={activeWorkspace} />
+              <AgentConsoleView
+                client={client}
+                activeWorkspace={activeWorkspace}
+                onNavigateToScreen={() => setActiveTab("screen")}
+              />
             </div>
 
             <div
@@ -516,7 +539,11 @@ export default function GravKtrlApp() {
               />
             </div>
             <div className="col-span-5 h-full border-r border-slate-200 overflow-hidden bg-[#f6f8fb]">
-              <AgentConsoleView client={client} activeWorkspace={activeWorkspace} />
+              <AgentConsoleView
+                client={client}
+                activeWorkspace={activeWorkspace}
+                onNavigateToScreen={() => setActiveTab("screen")}
+              />
             </div>
             <div className="col-span-4 h-full flex flex-col overflow-hidden bg-white">
               <div className="flex-1 min-h-0 border-b border-slate-200">
@@ -544,69 +571,86 @@ export default function GravKtrlApp() {
           {/* Agent Tab */}
           <button
             onClick={() => setActiveTab("agent")}
-            className={`flex flex-col items-center justify-center gap-0.5 min-w-[56px] min-h-[44px] h-full transition-all ${
+            className={`flex flex-col items-center justify-center gap-0.5 min-w-[50px] min-h-[44px] h-full transition-all ${
               activeTab === "agent" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
             }`}
           >
             {activeTab === "agent" ? (
-              <div className="w-10 h-7 rounded-full bg-indigo-50 shadow-neo-soft flex items-center justify-center text-indigo-600">
-                <span className="material-symbols-outlined text-[19px]">smart_toy</span>
+              <div className="w-9 h-7 rounded-full bg-indigo-50 shadow-neo-soft flex items-center justify-center text-indigo-600">
+                <span className="material-symbols-outlined text-[18px]">smart_toy</span>
               </div>
             ) : (
-              <span className="material-symbols-outlined text-[20px]">smart_toy</span>
+              <span className="material-symbols-outlined text-[19px]">smart_toy</span>
             )}
-            <span className="text-[11px] tracking-tight">Agent</span>
+            <span className="text-[10px] tracking-tight">Agent</span>
+          </button>
+
+          {/* Screen Mirror Tab */}
+          <button
+            onClick={() => setActiveTab("screen")}
+            className={`flex flex-col items-center justify-center gap-0.5 min-w-[50px] min-h-[44px] h-full transition-all ${
+              activeTab === "screen" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
+            }`}
+          >
+            {activeTab === "screen" ? (
+              <div className="w-9 h-7 rounded-full bg-indigo-50 shadow-neo-soft flex items-center justify-center text-indigo-600">
+                <span className="material-symbols-outlined text-[18px]">screenshot_monitor</span>
+              </div>
+            ) : (
+              <span className="material-symbols-outlined text-[19px]">screenshot_monitor</span>
+            )}
+            <span className="text-[10px] tracking-tight">Screen</span>
           </button>
 
           {/* Terminal Tab */}
           <button
             onClick={() => setActiveTab("terminal")}
-            className={`flex flex-col items-center justify-center gap-0.5 min-w-[56px] min-h-[44px] h-full transition-all ${
+            className={`flex flex-col items-center justify-center gap-0.5 min-w-[50px] min-h-[44px] h-full transition-all ${
               activeTab === "terminal" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
             }`}
           >
             {activeTab === "terminal" ? (
-              <div className="w-10 h-7 rounded-full bg-indigo-50 shadow-neo-soft flex items-center justify-center text-indigo-600">
-                <span className="material-symbols-outlined text-[19px]">terminal</span>
+              <div className="w-9 h-7 rounded-full bg-indigo-50 shadow-neo-soft flex items-center justify-center text-indigo-600">
+                <span className="material-symbols-outlined text-[18px]">terminal</span>
               </div>
             ) : (
-              <span className="material-symbols-outlined text-[20px]">terminal</span>
+              <span className="material-symbols-outlined text-[19px]">terminal</span>
             )}
-            <span className="text-[11px] tracking-tight">Terminal</span>
+            <span className="text-[10px] tracking-tight">Terminal</span>
           </button>
 
           {/* Git/Files Tab */}
           <button
             onClick={() => setActiveTab("git")}
-            className={`flex flex-col items-center justify-center gap-0.5 min-w-[56px] min-h-[44px] h-full transition-all ${
+            className={`flex flex-col items-center justify-center gap-0.5 min-w-[50px] min-h-[44px] h-full transition-all ${
               activeTab === "git" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
             }`}
           >
             {activeTab === "git" ? (
-              <div className="w-10 h-7 rounded-full bg-indigo-50 shadow-neo-soft flex items-center justify-center text-indigo-600">
-                <span className="material-symbols-outlined text-[19px]">account_tree</span>
+              <div className="w-9 h-7 rounded-full bg-indigo-50 shadow-neo-soft flex items-center justify-center text-indigo-600">
+                <span className="material-symbols-outlined text-[18px]">account_tree</span>
               </div>
             ) : (
-              <span className="material-symbols-outlined text-[20px]">account_tree</span>
+              <span className="material-symbols-outlined text-[19px]">account_tree</span>
             )}
-            <span className="text-[11px] tracking-tight">Git/Files</span>
+            <span className="text-[10px] tracking-tight">Git/Files</span>
           </button>
 
           {/* Host PC Tab */}
           <button
             onClick={() => setActiveTab("host")}
-            className={`flex flex-col items-center justify-center gap-0.5 min-w-[56px] min-h-[44px] h-full transition-all ${
+            className={`flex flex-col items-center justify-center gap-0.5 min-w-[50px] min-h-[44px] h-full transition-all ${
               activeTab === "host" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
             }`}
           >
             {activeTab === "host" ? (
-              <div className="w-10 h-7 rounded-full bg-indigo-50 shadow-neo-soft flex items-center justify-center text-indigo-600">
-                <span className="material-symbols-outlined text-[19px]">dns</span>
+              <div className="w-9 h-7 rounded-full bg-indigo-50 shadow-neo-soft flex items-center justify-center text-indigo-600">
+                <span className="material-symbols-outlined text-[18px]">dns</span>
               </div>
             ) : (
-              <span className="material-symbols-outlined text-[20px]">dns</span>
+              <span className="material-symbols-outlined text-[19px]">dns</span>
             )}
-            <span className="text-[11px] tracking-tight">Host PC</span>
+            <span className="text-[10px] tracking-tight">Host PC</span>
           </button>
         </div>
       </nav>

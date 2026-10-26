@@ -23,6 +23,7 @@ import {
   ExternalLink,
   Gauge,
   Zap,
+  Monitor,
 } from "lucide-react";
 import type {
   GravKtrlClient,
@@ -36,6 +37,7 @@ import type {
 interface AgentConsoleViewProps {
   client: GravKtrlClient;
   activeWorkspace: string;
+  onNavigateToScreen?: () => void;
 }
 
 interface FileActivity {
@@ -98,7 +100,7 @@ const CircularGauge: React.FC<{
   );
 };
 
-export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, activeWorkspace }) => {
+export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, activeWorkspace, onNavigateToScreen }) => {
   const [prompt, setPrompt] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [agentStatus, setAgentStatus] = useState<string>("idle");
@@ -704,6 +706,19 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
               <Activity className="w-3 h-3 text-indigo-600" />
               <span>Files ({recentFiles.length})</span>
             </button>
+
+            {/* Quick jump to Live PC Screen Mirror */}
+            {onNavigateToScreen && (
+              <button
+                type="button"
+                onClick={onNavigateToScreen}
+                className="h-7 px-2 rounded-lg bg-white shadow-neo-soft hover:shadow-neo-pressed active:shadow-neo-pressed border border-white/80 text-[10px] font-semibold text-slate-700 hover:text-indigo-600 flex items-center gap-1 transition-all"
+                title="View Remote PC Screen Mirror"
+              >
+                <Monitor className="w-3 h-3 text-indigo-600" />
+                <span className="hidden min-[380px]:inline">Screen</span>
+              </button>
+            )}
 
             {agentStatus === "generating" && (
               <button
