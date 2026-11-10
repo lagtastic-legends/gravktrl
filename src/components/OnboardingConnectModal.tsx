@@ -15,9 +15,13 @@ import {
   RefreshCw,
   Server,
   Zap,
+  Camera,
+  QrCode,
 } from "lucide-react";
 import { GravKtrlLogo } from "./GravKtrlLogo";
 import type { GravKtrlClient, DiscoveryBeacon, ConnectionState } from "../lib/gravktrl-client";
+import { CameraQrScannerModal, type ScanResult, type AntigravityScanResult } from "./CameraQrScannerModal";
+import { AntigravityCompanionDeck } from "./AntigravityCompanionDeck";
 
 interface OnboardingConnectModalProps {
   isOpen?: boolean;
@@ -55,6 +59,36 @@ export const OnboardingConnectModal: React.FC<OnboardingConnectModalProps> = ({
 
   // URI paste
   const [uriInput, setUriInput] = useState("");
+
+  // Live Camera Scanner states
+  const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
+  const [scannedAntigravity, setScannedAntigravity] = useState<AntigravityScanResult | null>(null);
+  const [isCompanionDeckOpen, setIsCompanionDeckOpen] = useState(false);
+
+  const handleScanSuccess = (result: ScanResult) => {
+    setIsCameraScannerOpen(false);
+    if (result.type === "antigravity") {
+      setScannedAntigravity(result);
+      setIsCompanionDeckOpen(true);
+    } else if (result.type === "gravktrl") {
+      const profile = {
+        id: "profile-" + Date.now(),
+        name: "PC Host (Scanned QR)",
+        host: result.host,
+        port: result.port,
+        token: result.token,
+        pin: result.pin,
+        isTailscale: result.host.startsWith("100."),
+        lastConnected: new Date().toISOString(),
+      };
+      client.saveProfile(profile);
+      client.connect(profile);
+      if (onConnected) onConnected();
+      else onClose();
+    } else {
+      alert("Scanned: " + result.text);
+    }
+  };
 
   // Diagnostic states
   const [isTestingCdp, setIsTestingCdp] = useState(false);
@@ -338,6 +372,33 @@ export const OnboardingConnectModal: React.FC<OnboardingConnectModalProps> = ({
                 </div>
               )}
 
+              {/* Point Camera at PC Screen QR Code Button */}
+              <button
+                onClick={() => setIsCameraScannerOpen(true)}
+                className="w-full p-3.5 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white shadow-neo-soft border border-indigo-500/30 flex items-center justify-between hover:brightness-110 active:scale-[0.98] transition-all group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-400 to-indigo-500 p-0.5 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                    <div className="w-full h-full bg-[#0f1117] rounded-[10px] flex items-center justify-center">
+                      <Camera className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
+                    </div>
+                  </div>
+                  <div className="text-left">
+                    <div className="text-xs font-black tracking-wide text-white flex items-center gap-1.5">
+                      SCAN PC SCREEN QR
+                      <Sparkles className="w-3 h-3 text-cyan-400" />
+                    </div>
+                    <div className="text-[10px] text-cyan-300 font-mono">
+                      Antigravity Remote Control or PC Daemon
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 text-[11px] font-extrabold uppercase px-3 py-1.5 rounded-xl bg-cyan-400 text-slate-950 shadow">
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span>Scan</span>
+                </div>
+              </button>
+
               {/* 6-Digit PIN Keypad Entry */}
               <div className="bg-white rounded-2xl p-4 shadow-neo-flat border border-white/60 text-center space-y-3">
                 <div>
@@ -462,6 +523,24 @@ export const OnboardingConnectModal: React.FC<OnboardingConnectModalProps> = ({
           )}
         </div>
       </div>
+
+      {/* Live Camera QR Scanner Modal */}
+      <CameraQrScannerModal
+        isOpen={isCameraScannerOpen}
+        onClose={() => setIsCameraScannerOpen(false)}
+        onScanSuccess={handleScanSuccess}
+      />
+
+      {/* Antigravity Cloud Companion Deck Sheet */}
+      <AntigravityCompanionDeck
+        isOpen={isCompanionDeckOpen}
+        onClose={() => setIsCompanionDeckOpen(false)}
+        data={scannedAntigravity}
+        onLinkPcHost={() => {
+          setIsCompanionDeckOpen(false);
+          setActiveTab("pair");
+        }}
+      />
     </div>
   );
 };

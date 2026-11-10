@@ -24,7 +24,11 @@ import {
   Gauge,
   Zap,
   Monitor,
+  Camera,
+  QrCode,
 } from "lucide-react";
+import { CameraQrScannerModal, type ScanResult, type AntigravityScanResult } from "./CameraQrScannerModal";
+import { AntigravityCompanionDeck } from "./AntigravityCompanionDeck";
 import type {
   GravKtrlClient,
   ProjectGroup,
@@ -197,6 +201,32 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const speechRef = useRef<{ start: () => void; stop: () => void; isSupported: boolean } | null>(null);
+
+  // Live Camera QR Scanner State
+  const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
+  const [scannedAntigravity, setScannedAntigravity] = useState<AntigravityScanResult | null>(null);
+  const [isCompanionDeckOpen, setIsCompanionDeckOpen] = useState(false);
+
+  const handleScanSuccess = (result: ScanResult) => {
+    setIsCameraScannerOpen(false);
+    if (result.type === "antigravity") {
+      setScannedAntigravity(result);
+      setIsCompanionDeckOpen(true);
+    } else if (result.type === "gravktrl") {
+      const profile = {
+        id: "profile-" + Date.now(),
+        name: "PC Host (Scanned QR)",
+        host: result.host,
+        port: result.port,
+        token: result.token,
+        pin: result.pin,
+        isTailscale: result.host.startsWith("100."),
+        lastConnected: new Date().toISOString(),
+      };
+      client.saveProfile(profile);
+      client.connect(profile);
+    }
+  };
 
   // Load conversations list and active conversation messages
   const loadConversations = async () => {
@@ -745,6 +775,17 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
               </button>
             )}
 
+            {/* Quick Live QR Scanner Button */}
+            <button
+              type="button"
+              onClick={() => setIsCameraScannerOpen(true)}
+              className="h-7 px-2 rounded-lg bg-white shadow-neo-soft hover:shadow-neo-pressed active:shadow-neo-pressed border border-white/80 text-[10px] font-semibold text-slate-700 hover:text-cyan-600 flex items-center gap-1 transition-all"
+              title="Scan Antigravity Screen QR or PC Pairing Code"
+            >
+              <QrCode className="w-3 h-3 text-cyan-600" />
+              <span className="hidden min-[380px]:inline">Scan</span>
+            </button>
+
             {agentStatus === "generating" && (
               <button
                 onClick={handleStop}
@@ -1281,6 +1322,20 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
           </div>
         </div>
       )}
+
+      {/* Live Camera QR Scanner Modal */}
+      <CameraQrScannerModal
+        isOpen={isCameraScannerOpen}
+        onClose={() => setIsCameraScannerOpen(false)}
+        onScanSuccess={handleScanSuccess}
+      />
+
+      {/* Antigravity Cloud Companion Deck Sheet */}
+      <AntigravityCompanionDeck
+        isOpen={isCompanionDeckOpen}
+        onClose={() => setIsCompanionDeckOpen(false)}
+        data={scannedAntigravity}
+      />
     </div>
   );
 };

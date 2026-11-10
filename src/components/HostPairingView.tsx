@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import type { GravKtrlClient, PcProfile, TelemetryData, ConnectionState, AntigravityRemoteControlInfo } from "../lib/gravktrl-client";
+import { CameraQrScannerModal, type ScanResult, type AntigravityScanResult } from "./CameraQrScannerModal";
+import { AntigravityCompanionDeck } from "./AntigravityCompanionDeck";
 
 interface HostPairingViewProps {
   client: GravKtrlClient;
@@ -39,8 +41,39 @@ export const HostPairingView: React.FC<HostPairingViewProps> = ({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastAlert, setToastAlert] = useState(false);
 
+  // Live Camera Scanner & Antigravity Companion Deck
+  const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
+  const [scannedAntigravity, setScannedAntigravity] = useState<AntigravityScanResult | null>(null);
+  const [isCompanionDeckOpen, setIsCompanionDeckOpen] = useState(false);
+
   // CPU history for SVG sparkline
   const [cpuHistory, setCpuHistory] = useState<number[]>([15, 20, 18, 24, 19, 22, 18]);
+
+  const handleScanSuccess = (result: ScanResult) => {
+    setIsCameraScannerOpen(false);
+    if (result.type === "antigravity") {
+      setScannedAntigravity(result);
+      setIsCompanionDeckOpen(true);
+      showToast("Antigravity Companion QR detected!");
+    } else if (result.type === "gravktrl") {
+      const profile: PcProfile = {
+        id: "profile-" + Date.now(),
+        name: "PC Host (Scanned QR)",
+        host: result.host,
+        port: result.port,
+        token: result.token,
+        pin: result.pin,
+        isTailscale: result.host.startsWith("100."),
+        lastConnected: new Date().toISOString(),
+      };
+      client.saveProfile(profile);
+      client.connect(profile);
+      loadProfiles();
+      showToast(`Connected to PC at ${result.host}:${result.port}`);
+    } else {
+      showToast(`Scanned: ${result.text.slice(0, 30)}...`);
+    }
+  };
 
   useEffect(() => {
     loadProfiles();
@@ -558,12 +591,31 @@ export const HostPairingView: React.FC<HostPairingViewProps> = ({
               <span className="text-[10px] font-bold">PASTE</span>
             </button>
             <button
-              onClick={onOpenOnboarding}
-              className="h-8 px-3 rounded-lg bg-gradient-to-r from-indigo-600 to-indigo-500 text-white font-bold text-[10px] flex items-center gap-1 shrink-0 shadow-md shadow-indigo-500/20 hover:brightness-105 active:scale-95 transition-all"
-              title="Scan QR Code or Auto-Discover"
+              onClick={() => setIsCameraScannerOpen(true)}
+              className="h-8 px-3 rounded-lg bg-gradient-to-r from-indigo-600 to-cyan-500 text-white font-bold text-[10px] flex items-center gap-1 shrink-0 shadow-md shadow-indigo-500/20 hover:brightness-105 active:scale-95 transition-all"
+              title="Live Camera QR Scanner (Antigravity Screen & PC Host)"
             >
               <span className="material-symbols-outlined text-[15px]">qr_code_scanner</span>
               <span>SCAN</span>
+            </button>
+          </div>
+
+          {/* Quick Camera Scanner Trigger Banner */}
+          <div className="flex items-center justify-between p-2.5 rounded-xl bg-gradient-to-r from-indigo-900/90 to-slate-900 text-white shadow-neo-soft mt-1 border border-indigo-500/30">
+            <div className="flex items-center gap-2 min-w-0 pr-2">
+              <div className="w-6 h-6 rounded-lg bg-cyan-400/20 flex items-center justify-center text-cyan-300 shrink-0">
+                <span className="material-symbols-outlined text-[15px]">photo_camera</span>
+              </div>
+              <div className="truncate">
+                <div className="text-[11px] font-bold text-white leading-tight">Antigravity Screen Scanner</div>
+                <div className="text-[9px] text-cyan-200/80 font-mono truncate">Scan Remote Control QR from Settings &gt; Application</div>
+              </div>
+            </div>
+            <button
+              onClick={() => setIsCameraScannerOpen(true)}
+              className="text-[10px] font-extrabold uppercase px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-400 to-indigo-400 text-slate-950 shrink-0 hover:brightness-110 active:scale-95 transition-all shadow-md"
+            >
+              Scan QR
             </button>
           </div>
 
@@ -666,6 +718,21 @@ export const HostPairingView: React.FC<HostPairingViewProps> = ({
           <span>{toastMessage}</span>
         </div>
       )}
+
+      {/* Live Camera QR Scanner Modal */}
+      <CameraQrScannerModal
+        isOpen={isCameraScannerOpen}
+        onClose={() => setIsCameraScannerOpen(false)}
+        onScanSuccess={handleScanSuccess}
+      />
+
+      {/* Antigravity Cloud Companion Deck */}
+      <AntigravityCompanionDeck
+        isOpen={isCompanionDeckOpen}
+        onClose={() => setIsCompanionDeckOpen(false)}
+        data={scannedAntigravity}
+        onLinkPcHost={() => onOpenOnboarding?.()}
+      />
     </div>
   );
 };
