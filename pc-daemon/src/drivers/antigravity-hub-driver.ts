@@ -8,6 +8,7 @@ export interface AntigravityRemoteControlStatus {
   instanceId: string;
   companionOrigin: string;
   url: string;
+  accountChooserUrl?: string;
   hostname: string;
   httpPort?: number;
   pid?: number;
@@ -121,6 +122,9 @@ export class AntigravityHubDriver {
       const instanceId = data.instanceId || "";
       const companionOrigin = data.companionOrigin || "https://antigravity.google.com";
       const url = instanceId ? `${companionOrigin}/r/${encodeURIComponent(instanceId)}` : "";
+      const accountChooserUrl = url
+        ? `https://accounts.google.com/AccountChooser?continue=${encodeURIComponent(url)}`
+        : "";
 
       // Also read configured hostname if available
       let hostname = "";
@@ -149,6 +153,7 @@ export class AntigravityHubDriver {
         instanceId,
         companionOrigin,
         url,
+        accountChooserUrl,
         hostname: hostname || os.hostname(),
         httpPort: hub.httpPort,
         pid: hub.pid,

@@ -45,6 +45,76 @@ export type ScanResult =
   | GravKtrlPairingScanResult
   | GenericScanResult;
 
+// Parse raw text into structured scan result with complete Antigravity AccountChooser & instance ID support
+export function parseDecodedScanText(raw: string): ScanResult {
+  const trimmed = raw.trim();
+
+  // Try decoding URI component if percent-encoded
+  let decoded = trimmed;
+  try {
+    decoded = decodeURIComponent(trimmed);
+  } catch {}
+
+  // 1. Antigravity Remote Control Companion URL or AccountChooser Link
+  // Matches:
+  // - https://antigravity.google.com/r/<instanceId>
+  // - https://accounts.google.com/AccountChooser?...continue=...antigravity.google.com/r/<instanceId>
+  // - Encoded variants: antigravity.google.com%2Fr%2F<instanceId>
+  // - Direct UUID instance IDs: d7eb7fb8-530a-4f50-8580-6493311de61e-v2
+  const directMatch = decoded.match(/antigravity\.google\.com\/r\/([a-zA-Z0-9_\-]+)/i);
+  const rawMatch = trimmed.match(/antigravity\.google\.com(?:%2Fr|\/r)(?:%2F|\/)([a-zA-Z0-9_\-]+)/i);
+  const uuidMatch = trimmed.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:-v\d+)?$/i);
+
+  const match = directMatch || rawMatch;
+  if (match || uuidMatch) {
+    const instanceId = match ? match[1] : trimmed;
+    const companionUrl = `https://antigravity.google.com/r/${instanceId}`;
+    // If the scanned URL is already an AccountChooser link, preserve the exact Google auth redirect
+    const accountChooserUrl =
+      trimmed.includes("accounts.google.com") && trimmed.includes("continue=")
+        ? trimmed
+        : `https://accounts.google.com/AccountChooser?continue=${encodeURIComponent(companionUrl)}`;
+
+    return {
+      type: "antigravity",
+      rawUrl: trimmed,
+      instanceId,
+      companionUrl,
+      accountChooserUrl,
+    };
+  }
+
+  // 2. GravKtrl Host Pairing Deep Link (gravktrl://pair?host=... or http://<ip>:8787/?token=...)
+  if (trimmed.startsWith("gravktrl://") || trimmed.includes(":8787")) {
+    try {
+      const urlStr = trimmed.startsWith("gravktrl://")
+        ? trimmed.replace("gravktrl://", "http://")
+        : trimmed;
+      const parsed = new URL(urlStr);
+      const host = parsed.searchParams.get("host") || parsed.hostname;
+      const port = parseInt(parsed.searchParams.get("port") || "8787", 10);
+      const token = parsed.searchParams.get("token") || "";
+      const pin = parsed.searchParams.get("pin") || undefined;
+
+      if (token) {
+        return {
+          type: "gravktrl",
+          rawUrl: trimmed,
+          host,
+          port,
+          token,
+          pin,
+        };
+      }
+    } catch (_) {}
+  }
+
+  return {
+    type: "generic",
+    text: trimmed,
+  };
+}
+
 interface CameraQrScannerModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -70,6 +140,7 @@ export const CameraQrScannerModal: React.FC<CameraQrScannerModalProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastDetected, setLastDetected] = useState<ScanResult | null>(null);
   const [autoConnect, setAutoConnect] = useState(true);
+  const [manualText, setManualText] = useState("");
 
   const animationFrameId = useRef<number | null>(null);
   const barcodeDetectorRef = useRef<any>(null);
@@ -114,68 +185,13 @@ export const CameraQrScannerModal: React.FC<CameraQrScannerModalProps> = ({
     } catch (_) {}
   }, []);
 
-  // Parse raw text into structured scan result
-  const parseDecodedText = useCallback((raw: string): ScanResult => {
-    const trimmed = raw.trim();
-
-    // 1. Antigravity Remote Control Companion URL: https://antigravity.google.com/r/<instanceId>
-    const antigravityMatch = trimmed.match(
-      /(?:https?:\/\/)?antigravity\.google\.com\/r\/([a-zA-Z0-9_\-]+)/i
-    );
-    if (antigravityMatch) {
-      const instanceId = antigravityMatch[1];
-      const companionUrl = `https://antigravity.google.com/r/${instanceId}`;
-      const accountChooserUrl = `https://accounts.google.com/AccountChooser?continue=${encodeURIComponent(
-        companionUrl
-      )}`;
-
-      return {
-        type: "antigravity",
-        rawUrl: trimmed,
-        instanceId,
-        companionUrl,
-        accountChooserUrl,
-      };
-    }
-
-    // 2. GravKtrl Host Pairing Deep Link (gravktrl://pair?host=... or http://<ip>:8787/?token=...)
-    if (trimmed.startsWith("gravktrl://") || trimmed.includes(":8787")) {
-      try {
-        const urlStr = trimmed.startsWith("gravktrl://")
-          ? trimmed.replace("gravktrl://", "http://")
-          : trimmed;
-        const parsed = new URL(urlStr);
-        const host = parsed.searchParams.get("host") || parsed.hostname;
-        const port = parseInt(parsed.searchParams.get("port") || "8787", 10);
-        const token = parsed.searchParams.get("token") || "";
-        const pin = parsed.searchParams.get("pin") || undefined;
-
-        if (token) {
-          return {
-            type: "gravktrl",
-            rawUrl: trimmed,
-            host,
-            port,
-            token,
-            pin,
-          };
-        }
-      } catch (_) {}
-    }
-
-    return {
-      type: "generic",
-      text: trimmed,
-    };
-  }, []);
-
   const handleSuccessfulScan = useCallback(
     (rawText: string) => {
       if (isProcessing) return;
       setIsProcessing(true);
       triggerSuccessFeedback();
 
-      const parsed = parseDecodedText(rawText);
+      const parsed = parseDecodedScanText(rawText);
       setLastDetected(parsed);
 
       // Instant Auto-Connect: immediately hand over to caller to connect with zero clicks
@@ -189,7 +205,7 @@ export const CameraQrScannerModal: React.FC<CameraQrScannerModalProps> = ({
         }, 500);
       }
     },
-    [isProcessing, triggerSuccessFeedback, parseDecodedText, onScanSuccess, autoConnect]
+    [isProcessing, triggerSuccessFeedback, onScanSuccess, autoConnect]
   );
 
   // Start Camera Stream
@@ -513,6 +529,32 @@ export const CameraQrScannerModal: React.FC<CameraQrScannerModalProps> = ({
               }`}
             >
               {autoConnect ? "ON (Instant Link)" : "OFF (Manual)"}
+            </button>
+          </div>
+
+          {/* Quick Manual Entry Strip */}
+          <div className="flex items-center gap-1.5 p-1 rounded-xl bg-black/40 border border-white/10">
+            <input
+              type="text"
+              placeholder="Or paste / type Antigravity link or ID..."
+              value={manualText}
+              onChange={(e) => setManualText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && manualText.trim()) {
+                  handleSuccessfulScan(manualText.trim());
+                }
+              }}
+              className="flex-1 bg-transparent px-2.5 py-1 text-xs text-white placeholder-slate-500 outline-none font-mono"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                if (manualText.trim()) handleSuccessfulScan(manualText.trim());
+              }}
+              disabled={!manualText.trim()}
+              className="px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-black font-extrabold text-[10px] uppercase tracking-wider transition-all"
+            >
+              Connect
             </button>
           </div>
 

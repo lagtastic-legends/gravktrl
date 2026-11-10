@@ -1,6 +1,6 @@
 {
   "name": "gravktrl",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "GravKtrl - Mobile-to-PC Remote Agent Commander & Terminal Bridge",
   "private": true,
   "scripts": {
@@ -16,6 +16,7 @@
   "dependencies": {
     "@capacitor/android": "^7.0.1",
     "@capacitor/app": "^7.1.2",
+    "@capacitor/browser": "^7.0.5",
     "@capacitor/cli": "^7.0.1",
     "@capacitor/core": "^7.0.1",
     "@xterm/addon-fit": "^0.11.0",

@@ -20,7 +20,12 @@ import { GitWorkspaceView } from "@/components/GitWorkspaceView";
 import { HostPairingView } from "@/components/HostPairingView";
 import { ScreenMirrorView } from "@/components/ScreenMirrorView";
 import { CompanionDeckView } from "@/components/CompanionDeckView";
-import { CameraQrScannerModal, type AntigravityScanResult, type ScanResult } from "@/components/CameraQrScannerModal";
+import {
+  CameraQrScannerModal,
+  parseDecodedScanText,
+  type AntigravityScanResult,
+  type ScanResult,
+} from "@/components/CameraQrScannerModal";
 
 type ActiveTab = "agent" | "companion" | "terminal" | "git" | "host" | "screen";
 
@@ -164,6 +169,23 @@ export default function GravKtrlApp() {
           setActiveWorkspace(telem.activeDirectory);
         }
       }
+
+      // Auto-sync Antigravity Remote Control from connected PC host if available
+      try {
+        const rc = await client.getAntigravityRemoteControl();
+        if (rc && rc.enabled && rc.instanceId) {
+          const companionResult: AntigravityScanResult = {
+            type: "antigravity",
+            rawUrl: rc.url,
+            instanceId: rc.instanceId,
+            companionUrl: rc.url,
+            accountChooserUrl: `https://accounts.google.com/AccountChooser?continue=${encodeURIComponent(
+              rc.url
+            )}`,
+          };
+          setActiveCompanion((prev) => prev || companionResult);
+        }
+      } catch {}
     } catch {}
   };
 
@@ -189,6 +211,22 @@ export default function GravKtrlApp() {
     setActiveTab("companion");
     setIsGlobalScannerOpen(false);
     setShowOnboarding(false);
+
+    // INSTANT LAUNCH: Native Chrome Custom Tabs for zero X-Frame blocks & full Google auth
+    const targetUrl = result.accountChooserUrl || result.companionUrl;
+    import("@capacitor/browser")
+      .then(({ Browser }) => {
+        Browser.open({
+          url: targetUrl,
+          presentationStyle: "popover",
+          toolbarColor: "#0f1117",
+        }).catch(() => {
+          window.open(targetUrl, "_blank", "noopener,noreferrer");
+        });
+      })
+      .catch(() => {
+        window.open(targetUrl, "_blank", "noopener,noreferrer");
+      });
   };
 
   // AUTOMATIC CONNECT: GravKtrl Host PC
@@ -217,6 +255,26 @@ export default function GravKtrlApp() {
         lastConnected: new Date().toISOString(),
       };
       handleHostPairingSuccess(profile);
+    } else if (result.type === "generic") {
+      // Safety net: re-parse raw string in case of nested Google AccountChooser links
+      const retry = parseDecodedScanText(result.text);
+      if (retry.type === "antigravity") {
+        handleAntigravityConnected(retry);
+      } else if (retry.type === "gravktrl") {
+        const profile = {
+          id: "profile-scan-" + Date.now(),
+          name: "PC Host (Scanned QR)",
+          host: retry.host,
+          port: retry.port,
+          token: retry.token,
+          pin: retry.pin,
+          isTailscale: retry.host.startsWith("100."),
+          lastConnected: new Date().toISOString(),
+        };
+        handleHostPairingSuccess(profile);
+      } else {
+        alert("Scanned QR code: " + result.text.slice(0, 100));
+      }
     }
   };
 
@@ -428,6 +486,8 @@ export default function GravKtrlApp() {
                 }}
                 companionHistory={companionHistory}
                 onSelectCompanion={(item) => handleAntigravityConnected(item)}
+                client={client}
+                onNavigateToTab={(tab) => setActiveTab(tab)}
               />
             )}
             {activeTab === "terminal" && (
@@ -483,6 +543,8 @@ export default function GravKtrlApp() {
                   }}
                   companionHistory={companionHistory}
                   onSelectCompanion={(item) => handleAntigravityConnected(item)}
+                  client={client}
+                  onNavigateToTab={(tab) => setActiveTab(tab)}
                 />
               )}
               {activeTab === "agent" && (

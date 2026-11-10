@@ -27,19 +27,15 @@ try {
     if ($res -and $res.status -eq "online") {
         $isOnline = $true
     }
-} catch {}
+} catch {
+    $isOnline = $false
+}
 
 if (-not $isOnline) {
     Write-Host "[1/3] Starting GravKtrl PC Daemon in background..." -ForegroundColor Yellow
-    
-    # Check if tsx or node is available
-    $npxPath = (Get-Command "npx.cmd" -ErrorAction SilentlyContinue).Source
-    if (-not $npxPath) { $npxPath = "npx" }
 
-    Start-Process -FilePath $npxPath `
-        -ArgumentList "tsx", "pc-daemon/src/server.ts" `
-        -WorkingDirectory $repoRoot `
-        -WindowStyle Hidden
+    $tsxPath = Join-Path $repoRoot "node_modules\tsx\dist\cli.mjs"
+    Start-Process -FilePath "node.exe" -ArgumentList "`"$tsxPath`" pc-daemon/src/server.ts" -WorkingDirectory $repoRoot -WindowStyle Hidden
 
     # Wait for daemon to become ready
     $retries = 15
@@ -56,12 +52,12 @@ if (-not $isOnline) {
     }
 
     if ($isOnline) {
-        Write-Host "✓ [1/3] GravKtrl PC Daemon is ONLINE at 0.0.0.0:$port" -ForegroundColor Green
+        Write-Host "[OK] [1/3] GravKtrl PC Daemon is ONLINE at 0.0.0.0:$port" -ForegroundColor Green
     } else {
         Write-Host "[WARNING] Daemon taking longer than expected to report health. Proceeding to launch UI..." -ForegroundColor Yellow
     }
 } else {
-    Write-Host "✓ [1/3] GravKtrl PC Daemon is already active!" -ForegroundColor Green
+    Write-Host "[OK] [1/3] GravKtrl PC Daemon is already active!" -ForegroundColor Green
 }
 
 # 2. Ensure Desktop Shortcut exists
@@ -78,9 +74,9 @@ try {
             $lnk.IconLocation = "$icoPath,0"
         }
         $lnk.Save()
-        Write-Host "✓ [2/3] Created Desktop shortcut: 'GravKtrl Windows Control'" -ForegroundColor Green
+        Write-Host "[OK] [2/3] Created Desktop shortcut: 'GravKtrl Windows Control'" -ForegroundColor Green
     } else {
-        Write-Host "✓ [2/3] Desktop shortcut already present." -ForegroundColor Green
+        Write-Host "[OK] [2/3] Desktop shortcut already present." -ForegroundColor Green
     }
 } catch {
     Write-Host "[INFO] Shortcut check complete." -ForegroundColor DarkGray
@@ -89,15 +85,17 @@ try {
 # 3. Locate browser for --app mode (Edge -> Chrome -> Default)
 Write-Host "[3/3] Opening Frameless Desktop Control Center..." -ForegroundColor Cyan
 
+$p86 = $env:SystemDrive + "\Program Files (x86)"
+
 $edgeCandidates = @(
     "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
-    "$env:ProgramFiles(x86)\Microsoft\Edge\Application\msedge.exe",
+    "$p86\Microsoft\Edge\Application\msedge.exe",
     "$env:LOCALAPPDATA\Microsoft\Edge\Application\msedge.exe"
 )
 
 $chromeCandidates = @(
     "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
-    "$env:ProgramFiles(x86)\Google\Chrome\Application\chrome.exe",
+    "$p86\Google\Chrome\Application\chrome.exe",
     "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
 )
 
@@ -120,10 +118,10 @@ if (-not $browserExe) {
 
 if ($browserExe) {
     Start-Process -FilePath $browserExe -ArgumentList "--app=$desktopUrl", "--window-size=460,720"
-    Write-Host "✓ Launched GravKtrl Desktop in native app-window mode ($browserExe)" -ForegroundColor Green
+    Write-Host "[OK] Launched GravKtrl Desktop in native app-window mode ($browserExe)" -ForegroundColor Green
 } else {
     Start-Process $desktopUrl
-    Write-Host "✓ Opened GravKtrl Desktop in default browser" -ForegroundColor Green
+    Write-Host "[OK] Opened GravKtrl Desktop in default browser" -ForegroundColor Green
 }
 
 Write-Host "======================================================================" -ForegroundColor Cyan

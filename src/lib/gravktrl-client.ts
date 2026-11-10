@@ -177,6 +177,7 @@ export interface AntigravityRemoteControlInfo {
   instanceId: string;
   companionOrigin: string;
   url: string;
+  accountChooserUrl?: string;
   hostname: string;
   httpPort?: number;
   pid?: number;
