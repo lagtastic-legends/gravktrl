@@ -1,8 +1,25 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
-import { Terminal, Play, Square, AlertTriangle, ShieldCheck, Trash2, ArrowUp, ArrowDown } from "lucide-react";
-import type { GravKtrlClient, ApprovalRequest } from "../lib/gravktrl-client";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import {
+  Terminal as TerminalIcon,
+  Play,
+  Square,
+  AlertTriangle,
+  ShieldCheck,
+  RotateCw,
+  Trash2,
+  CornerDownLeft,
+  ChevronUp,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Sparkles,
+  Command,
+  Plus,
+} from "lucide-react";
+import type { GravKtrlClient, TerminalSessionInfo, ApprovalRequest } from "../lib/gravktrl-client";
+import "@xterm/xterm/css/xterm.css";
 
 interface TerminalDeckViewProps {
   client: GravKtrlClient;
@@ -11,113 +28,246 @@ interface TerminalDeckViewProps {
 
 const TERMINAL_MACROS = [
   { label: "typecheck", cmd: "npm run typecheck" },
-  { label: "test", cmd: "npm test" },
   { label: "git status", cmd: "git status" },
+  { label: "git diff", cmd: "git diff" },
+  { label: "npm test", cmd: "npm test" },
   { label: "adb devices", cmd: "adb devices" },
-  { label: "gradlew debug", cmd: "cd android && gradlew assembleDebug" },
+  { label: "gradlew debug", cmd: "cd android; .\\gradlew.bat assembleDebug" },
+  { label: "ls / dir", cmd: "dir" },
 ];
 
 export const TerminalDeckView: React.FC<TerminalDeckViewProps> = ({ client, activeWorkspace }) => {
-  const [command, setCommand] = useState("");
-  const [lines, setLines] = useState<Array<{ id: string; text: string; stream: "stdout" | "stderr" | "system" }>>([
-    {
-      id: "init",
-      text: "[GravKtrl Terminal Deck] Connected to native PC terminal engine.\nWorking directory: " + activeWorkspace,
-      stream: "system",
-    },
-  ]);
-  const [activeExecutionId, setActiveExecutionId] = useState<string | null>(null);
-  const [history, setHistory] = useState<string[]>([]);
-  const [historyIdx, setHistoryIdx] = useState<number>(-1);
+  const terminalContainerRef = useRef<HTMLDivElement>(null);
+  const xtermRef = useRef<any>(null);
+  const fitAddonRef = useRef<any>(null);
+
+  const [activeSession, setActiveSession] = useState<TerminalSessionInfo | null>(null);
+  const [sessions, setSessions] = useState<TerminalSessionInfo[]>([]);
+  const [isReady, setIsReady] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
 
-  const terminalEndRef = useRef<HTMLDivElement>(null);
+  // Sticky modifier keys for mobile accessory bar
+  const [ctrlActive, setCtrlActive] = useState(false);
+  const [altActive, setAltActive] = useState(false);
+
+  // Fallback direct text input for devices where canvas touch doesn't trigger soft keyboard
+  const [showDirectInput, setShowDirectInput] = useState(false);
+  const [directCommand, setDirectCommand] = useState("");
+
+  /**
+   * Initializes or fetches primary terminal session on mount.
+   */
+  const initSession = useCallback(async () => {
+    try {
+      const session = await client.getOrCreatePrimaryTerminalSession(activeWorkspace);
+      if (session) {
+        setActiveSession(session);
+        setSessions([session]);
+      }
+    } catch (err) {
+      console.warn("[TerminalDeck] Failed to get/create terminal session:", err);
+    }
+  }, [client, activeWorkspace]);
 
   useEffect(() => {
-    const unsubOutput = client.on("terminal.output", (data: any) => {
-      if (!data?.chunk) return;
-      setLines((prev) => [
-        ...prev,
-        {
-          id: Math.random().toString(),
-          text: data.chunk,
-          stream: data.stream || "stdout",
+    initSession();
+  }, [initSession]);
+
+  /**
+   * Dynamically loads xterm.js and FitAddon in client environment.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined" || !terminalContainerRef.current) return;
+
+    let isSubscribed = true;
+
+    async function setupXterm() {
+      const { Terminal } = await import("@xterm/xterm");
+      const { FitAddon } = await import("@xterm/addon-fit");
+
+      if (!isSubscribed || !terminalContainerRef.current) return;
+
+      // Clean up existing instance if any
+      if (xtermRef.current) {
+        xtermRef.current.dispose();
+      }
+
+      const term = new Terminal({
+        cursorBlink: true,
+        cursorStyle: "bar",
+        fontSize: 12,
+        lineHeight: 1.25,
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+        theme: {
+          background: "#0b0f19",
+          foreground: "#f8fafc",
+          cursor: "#818cf8",
+          cursorAccent: "#0b0f19",
+          selectionBackground: "rgba(99, 102, 241, 0.35)",
+          black: "#0f172a",
+          red: "#f43f5e",
+          green: "#10b981",
+          yellow: "#f59e0b",
+          blue: "#6366f1",
+          magenta: "#d946ef",
+          cyan: "#06b6d4",
+          white: "#f8fafc",
+          brightBlack: "#475569",
+          brightRed: "#fb7185",
+          brightGreen: "#34d399",
+          brightYellow: "#fbbf24",
+          brightBlue: "#818cf8",
+          brightMagenta: "#e879f9",
+          brightCyan: "#22d3ee",
+          brightWhite: "#ffffff",
         },
-      ]);
+        convertEol: true,
+        scrollback: 3000,
+      });
+
+      const fitAddon = new FitAddon();
+      term.loadAddon(fitAddon);
+
+      terminalContainerRef.current.innerHTML = "";
+      term.open(terminalContainerRef.current);
+      fitAddon.fit();
+
+      xtermRef.current = term;
+      fitAddonRef.current = fitAddon;
+      setIsReady(true);
+
+      // Handle user typing directly into xterm
+      term.onData((data: string) => {
+        if (!activeSession) return;
+        client.sendTerminalData(activeSession.sessionId, data);
+      });
+
+      // Handle window / container resize
+      const resizeObserver = new ResizeObserver(() => {
+        try {
+          fitAddon.fit();
+          if (activeSession && term.cols && term.rows) {
+            client.resizeTerminal(activeSession.sessionId, term.cols, term.rows);
+          }
+        } catch {}
+      });
+
+      if (terminalContainerRef.current) {
+        resizeObserver.observe(terminalContainerRef.current);
+      }
+
+      return () => {
+        resizeObserver.disconnect();
+      };
+    }
+
+    setupXterm();
+
+    return () => {
+      isSubscribed = false;
+      if (xtermRef.current) {
+        xtermRef.current.dispose();
+        xtermRef.current = null;
+      }
+    };
+  }, [activeSession, client]);
+
+  /**
+   * Subscribes to live terminal output from WebSocket.
+   */
+  useEffect(() => {
+    const unsubData = client.on("terminal.data", (event: any) => {
+      if (!event || !event.data) return;
+      if (activeSession && event.sessionId && event.sessionId !== activeSession.sessionId) {
+        return;
+      }
+      if (xtermRef.current) {
+        xtermRef.current.write(event.data);
+      }
     });
 
-    const unsubExit = client.on("terminal.exit", (data: any) => {
-      setLines((prev) => [
-        ...prev,
-        {
-          id: Math.random().toString(),
-          text: `\n[Process exited with code ${data.exitCode} in ${data.durationMs}ms]\n`,
-          stream: "system",
-        },
-      ]);
-      setActiveExecutionId(null);
+    const unsubExit = client.on("terminal.sessionExit", (event: any) => {
+      if (xtermRef.current) {
+        xtermRef.current.writeln(`\r\n\x1b[33m[Session Exited with code ${event?.exitCode ?? 0}]\x1b[0m\r\n`);
+      }
     });
 
-    const unsubApproval = client.on("approval.required", (data: any) => {
-      setPendingApproval(data as ApprovalRequest);
+    const unsubApproval = client.on("approval.required", (event: any) => {
+      setPendingApproval(event as ApprovalRequest);
     });
 
     return () => {
-      unsubOutput();
+      unsubData();
       unsubExit();
       unsubApproval();
     };
-  }, [client]);
+  }, [client, activeSession]);
 
-  useEffect(() => {
-    terminalEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [lines]);
+  /**
+   * Sends raw string or key sequence to active session.
+   */
+  const sendKey = (keySeq: string) => {
+    if (!activeSession) return;
 
-  const handleExecute = async (cmdToRun?: string) => {
-    const cmd = (cmdToRun || command).trim();
-    if (!cmd) return;
+    let payload = keySeq;
 
-    setCommand("");
-    setHistory((prev) => [cmd, ...prev.filter((c) => c !== cmd)]);
-    setHistoryIdx(-1);
-
-    setLines((prev) => [
-      ...prev,
-      {
-        id: Math.random().toString(),
-        text: `\nPS ${activeWorkspace}> ${cmd}`,
-        stream: "system",
-      },
-    ]);
-
-    try {
-      const res = await client.executeTerminal(cmd);
-      if (res.status === "approval_required") {
-        setPendingApproval({
-          approvalId: res.executionId,
-          command: cmd,
-          riskReason: res.riskReason || "High-risk command detected",
-        });
-      } else {
-        setActiveExecutionId(res.executionId);
+    // Apply CTRL modifier
+    if (ctrlActive) {
+      if (keySeq.length === 1) {
+        const charCode = keySeq.toUpperCase().charCodeAt(0);
+        if (charCode >= 64 && charCode <= 95) {
+          payload = String.fromCharCode(charCode - 64);
+        }
       }
-    } catch (err: any) {
-      setLines((prev) => [
-        ...prev,
-        {
-          id: Math.random().toString(),
-          text: `\n[Execution Error]: ${err.message || String(err)}\n`,
-          stream: "stderr",
-        },
-      ]);
+      setCtrlActive(false);
+    }
+
+    // Apply ALT modifier (Escape prefix)
+    if (altActive) {
+      payload = "\x1b" + payload;
+      setAltActive(false);
+    }
+
+    client.sendTerminalData(activeSession.sessionId, payload);
+    xtermRef.current?.focus();
+  };
+
+  /**
+   * Runs a complete macro command followed by Enter.
+   */
+  const handleExecuteMacro = (cmdText: string) => {
+    if (!activeSession) return;
+    client.sendTerminalData(activeSession.sessionId, `${cmdText}\r`);
+    xtermRef.current?.focus();
+  };
+
+  const handleRestartSession = async () => {
+    if (activeSession) {
+      await client.killTerminalSession(activeSession.sessionId);
+    }
+    xtermRef.current?.clear();
+    const newSession = await client.createTerminalSession({
+      cwd: activeWorkspace,
+      cols: xtermRef.current?.cols || 80,
+      rows: xtermRef.current?.rows || 24,
+    });
+    setActiveSession(newSession);
+    setSessions([newSession]);
+    xtermRef.current?.focus();
+  };
+
+  const handleClearTerminal = () => {
+    xtermRef.current?.clear();
+    // Also send Ctrl+L to shell to reset cursor
+    if (activeSession) {
+      client.sendTerminalData(activeSession.sessionId, "\x0c");
     }
   };
 
   const handleApprove = async () => {
     if (!pendingApproval) return;
     try {
-      const res = await client.approveCommand(pendingApproval.approvalId);
-      setActiveExecutionId(res.executionId);
+      await client.approveCommand(pendingApproval.approvalId);
       setPendingApproval(null);
     } catch (err: any) {
       alert("Approval error: " + err.message);
@@ -126,190 +276,279 @@ export const TerminalDeckView: React.FC<TerminalDeckViewProps> = ({ client, acti
 
   const handleDeny = () => {
     setPendingApproval(null);
-    setLines((prev) => [
-      ...prev,
-      {
-        id: Math.random().toString(),
-        text: `\n[Security Alert]: Command execution denied by mobile operator.\n`,
-        stream: "stderr",
-      },
-    ]);
-  };
-
-  const handleKill = async () => {
-    if (!activeExecutionId) return;
-    await client.killTerminal(activeExecutionId);
-    setActiveExecutionId(null);
-  };
-
-  const clearTerminal = () => {
-    setLines([]);
-  };
-
-  const navigateHistory = (direction: "up" | "down") => {
-    if (history.length === 0) return;
-    if (direction === "up") {
-      const nextIdx = Math.min(historyIdx + 1, history.length - 1);
-      setHistoryIdx(nextIdx);
-      setCommand(history[nextIdx] || "");
-    } else {
-      const nextIdx = Math.max(historyIdx - 1, -1);
-      setHistoryIdx(nextIdx);
-      setCommand(nextIdx === -1 ? "" : history[nextIdx] || "");
+    if (xtermRef.current) {
+      xtermRef.current.writeln("\r\n\x1b[31m[Security Alert]: Command execution denied by operator.\x1b[0m\r\n");
     }
   };
 
+  const handleDirectCommandSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!directCommand.trim() || !activeSession) return;
+    client.sendTerminalData(activeSession.sessionId, directCommand + "\r");
+    setDirectCommand("");
+  };
+
   return (
-    <div className="flex flex-col h-full bg-[#f6f8fb] text-slate-800 select-text">
-      {/* 1. Header Strip */}
-      <div className="mx-3 mt-3 p-3 rounded-2xl bg-white shadow-neo-flat border border-white/60 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2 overflow-hidden">
+    <div className="flex flex-col h-full bg-[#f6f8fb] text-slate-800 select-none relative overflow-hidden">
+      {/* 1. TOP STATUS & SESSION TOOLBAR */}
+      <div className="mx-3 mt-3 p-2.5 rounded-2xl bg-white shadow-neo-flat border border-white/60 flex items-center justify-between gap-2 shrink-0 z-20">
+        <div className="flex items-center gap-2 min-w-0">
           <div className="w-8 h-8 rounded-xl bg-indigo-50 shadow-neo-soft flex items-center justify-center text-indigo-600 shrink-0">
-            <Terminal className="w-4 h-4" />
+            <TerminalIcon className="w-4 h-4" />
           </div>
           <div className="flex flex-col min-w-0">
-            <span className="font-bold text-xs text-slate-800">Native Terminal Engine</span>
-            <span className="text-[10px] font-mono text-slate-400 truncate max-w-[160px]" title={activeWorkspace}>
-              {activeWorkspace}
+            <div className="flex items-center gap-1.5">
+              <span className="font-extrabold text-xs text-slate-800 truncate">
+                {activeSession?.name || "Interactive Shell"}
+              </span>
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full bg-emerald-50 text-emerald-700 text-[9px] font-bold border border-emerald-200">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                LIVE REPL
+              </span>
+            </div>
+            <span className="text-[10px] font-mono text-slate-400 truncate max-w-[180px]" title={activeWorkspace}>
+              {activeWorkspace.split(/[\\/]/).pop()}
             </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {activeExecutionId ? (
-            <button
-              onClick={handleKill}
-              className="px-2.5 py-1 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 shadow-neo-soft text-[10px] font-bold flex items-center gap-1 active:shadow-neo-pressed"
-            >
-              <Square className="w-2.5 h-2.5 fill-current text-rose-600" />
-              KILL
-            </button>
-          ) : (
-            <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
-              READY
-            </span>
-          )}
+        {/* Action Controls */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => sendKey("\x03")}
+            className="h-7 px-2 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 shadow-neo-soft text-[10px] font-bold flex items-center gap-1 active:shadow-neo-pressed"
+            title="Send Ctrl+C (Interrupt/Break)"
+          >
+            <Square className="w-2.5 h-2.5 fill-current text-rose-600" />
+            <span>Ctrl+C</span>
+          </button>
 
           <button
-            onClick={clearTerminal}
-            className="p-1.5 rounded-xl bg-white shadow-neo-soft border border-white/80 text-slate-500 hover:text-slate-800 active:shadow-neo-pressed"
-            title="Clear buffer"
+            type="button"
+            onClick={handleClearTerminal}
+            className="w-7 h-7 rounded-lg bg-white shadow-neo-soft border border-white/80 text-slate-500 hover:text-slate-800 flex items-center justify-center active:shadow-neo-pressed"
+            title="Clear Terminal Screen (Ctrl+L)"
           >
             <Trash2 className="w-3.5 h-3.5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={handleRestartSession}
+            className="w-7 h-7 rounded-lg bg-white shadow-neo-soft border border-white/80 text-slate-500 hover:text-indigo-600 flex items-center justify-center active:shadow-neo-pressed"
+            title="Restart Interactive Shell Session"
+          >
+            <RotateCw className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
-      {/* 2. Destructive Safety Guard Approval Modal */}
+      {/* 2. DESTRUCTIVE COMMAND GUARD MODAL */}
       {pendingApproval && (
-        <div className="mx-3 mt-2 p-3.5 rounded-2xl bg-rose-50 border border-rose-200 shadow-neo-flat text-rose-950 shrink-0">
-          <div className="flex items-center gap-2 mb-1.5">
+        <div className="mx-3 mt-2 p-3 rounded-2xl bg-rose-50 border border-rose-200 shadow-neo-flat text-rose-950 shrink-0 z-20 animate-in fade-in">
+          <div className="flex items-center gap-1.5 mb-1">
             <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
             <span className="text-xs font-bold uppercase tracking-wide text-rose-800">Destructive Safety Guard</span>
           </div>
-          <p className="text-xs text-rose-900 mb-1.5">{pendingApproval.riskReason}</p>
-          <div className="p-2 neo-well rounded-xl font-mono text-[11px] text-slate-800 mb-3 break-all">
+          <p className="text-[11px] text-rose-900 mb-1.5">{pendingApproval.riskReason}</p>
+          <div className="p-2 neo-well rounded-xl font-mono text-[11px] text-slate-800 mb-2 break-all bg-white/60">
             {pendingApproval.command}
           </div>
           <div className="flex items-center gap-2 justify-end">
             <button
               onClick={handleDeny}
-              className="px-3 py-1.5 rounded-xl bg-white shadow-neo-soft text-slate-700 font-bold text-xs hover:bg-slate-50 active:shadow-neo-pressed"
+              className="px-3 py-1 rounded-xl bg-white shadow-neo-soft text-slate-700 font-bold text-xs hover:bg-slate-50 active:shadow-neo-pressed"
             >
               Deny
             </button>
             <button
               onClick={handleApprove}
-              className="px-3 py-1.5 rounded-xl bg-rose-600 text-white font-bold text-xs shadow-neo-soft hover:bg-rose-700 flex items-center gap-1 active:scale-95"
+              className="px-3 py-1 rounded-xl bg-rose-600 text-white font-bold text-xs shadow-neo-soft hover:bg-rose-700 flex items-center gap-1 active:scale-95"
             >
               <ShieldCheck className="w-3.5 h-3.5" />
-              Authorize &amp; Execute
+              <span>Authorize &amp; Execute</span>
             </button>
           </div>
         </div>
       )}
 
-      {/* 3. Terminal Quick Command Macros */}
-      <div className="flex items-center gap-1.5 px-3 py-2 overflow-x-auto no-scrollbar shrink-0">
+      {/* 3. TACTICAL PRESET MACROS ROW */}
+      <div className="flex items-center gap-1.5 px-3 py-2 overflow-x-auto no-scrollbar shrink-0 z-10">
         {TERMINAL_MACROS.map((m, idx) => (
           <button
             key={idx}
-            onClick={() => handleExecute(m.cmd)}
-            className="whitespace-nowrap px-3 py-1.5 text-[11px] font-semibold rounded-full bg-white shadow-neo-soft hover:shadow-neo-pressed active:shadow-neo-pressed text-slate-700 border border-white/80 transition-all shrink-0"
+            type="button"
+            onClick={() => handleExecuteMacro(m.cmd)}
+            className="whitespace-nowrap px-2.5 py-1 text-[10px] font-semibold rounded-full bg-white shadow-neo-soft hover:shadow-neo-pressed active:shadow-neo-pressed text-slate-700 border border-white/80 transition-all shrink-0 flex items-center gap-1 group"
           >
-            {m.label}
+            <Play className="w-2 h-2 text-indigo-500 fill-current group-hover:text-indigo-600" />
+            <span>{m.label}</span>
           </button>
         ))}
       </div>
 
-      {/* 4. Terminal Output Viewport (Dark Inset Window for Perfect Readability) */}
-      <div className="flex-1 mx-3 mb-2 p-3.5 rounded-2xl bg-[#0f172a] shadow-neo-pressed border border-slate-700/40 text-slate-100 font-mono text-xs overflow-y-auto leading-relaxed select-text">
-        {lines.map((l) => (
-          <div
-            key={l.id}
-            className={`whitespace-pre-wrap ${
-              l.stream === "stderr"
-                ? "text-rose-400 font-bold"
-                : l.stream === "system"
-                ? "text-cyan-400"
-                : "text-slate-200"
-            }`}
-          >
-            {l.text}
-          </div>
-        ))}
-        <div ref={terminalEndRef} />
-      </div>
+      {/* 4. MAIN XTERM.JS TERMINAL CANVAS */}
+      <div
+        onClick={() => xtermRef.current?.focus()}
+        className="flex-1 min-h-0 mx-3 mb-2 rounded-2xl bg-[#0b0f19] shadow-inner border border-slate-800/80 p-2.5 overflow-hidden flex flex-col relative"
+      >
+        <div
+          ref={terminalContainerRef}
+          className="w-full h-full overflow-hidden"
+          style={{ minHeight: "180px" }}
+        />
 
-      {/* 5. Terminal Command Input Bar */}
-      <div className="shrink-0 p-3 bg-[#f6f8fb]/95 backdrop-blur-xl border-t border-slate-200/60">
-        <div className="flex items-center gap-2">
-          {/* History Nav */}
-          <div className="flex flex-col gap-1 shrink-0">
-            <button
-              type="button"
-              onClick={() => navigateHistory("up")}
-              className="w-7 h-4 rounded-md bg-white shadow-neo-soft flex items-center justify-center text-slate-600 active:shadow-neo-pressed"
-              title="Previous Command"
-            >
-              <ArrowUp className="w-2.5 h-2.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => navigateHistory("down")}
-              className="w-7 h-4 rounded-md bg-white shadow-neo-soft flex items-center justify-center text-slate-600 active:shadow-neo-pressed"
-              title="Next Command"
-            >
-              <ArrowDown className="w-2.5 h-2.5" />
-            </button>
-          </div>
-
-          {/* Command Input Well */}
-          <div className="flex-1 relative">
-            <input
-              type="text"
-              value={command}
-              onChange={(e) => setCommand(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleExecute();
-                else if (e.key === "ArrowUp") navigateHistory("up");
-                else if (e.key === "ArrowDown") navigateHistory("down");
-              }}
-              placeholder="Enter shell command (npm, git, adb, gradlew)..."
-              className="w-full neo-well rounded-2xl px-3.5 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none font-mono"
-            />
-          </div>
-
-          {/* Run Button */}
+        {/* Tap to Focus Overlay helper */}
+        <div className="absolute top-2 right-2 flex items-center gap-1 z-10">
           <button
             type="button"
-            onClick={() => handleExecute()}
-            disabled={!command.trim()}
-            className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-500 shadow-neo-soft text-white flex items-center justify-center shrink-0 font-medium disabled:opacity-40 hover:brightness-105 active:scale-95 transition-all"
-            title="Execute Command"
+            onClick={() => setShowDirectInput(!showDirectInput)}
+            className="px-2 py-0.5 rounded-md bg-slate-800/80 hover:bg-slate-700 text-[10px] font-mono text-slate-300 backdrop-blur-sm border border-slate-700"
+            title="Toggle Text Input Box"
           >
-            <Play className="w-4 h-4 fill-current" />
+            {showDirectInput ? "Hide Input" : "Input Bar"}
           </button>
+        </div>
+      </div>
+
+      {/* Direct Command Input Bar (Optional fallback for soft keyboard) */}
+      {showDirectInput && (
+        <form onSubmit={handleDirectCommandSubmit} className="mx-3 mb-2 flex items-center gap-1.5 shrink-0 z-20">
+          <input
+            type="text"
+            value={directCommand}
+            onChange={(e) => setDirectCommand(e.target.value)}
+            placeholder="Type command and press Send..."
+            className="flex-1 h-8 neo-well rounded-xl px-3 text-[11px] font-mono text-slate-800 placeholder-slate-400 focus:outline-none"
+          />
+          <button
+            type="submit"
+            className="h-8 px-3 rounded-xl bg-indigo-600 text-white text-[11px] font-bold shadow-neo-soft active:scale-95"
+          >
+            Send
+          </button>
+        </form>
+      )}
+
+      {/* 5. SILK NEOMORPHIC MOBILE ACCESSORY BAR (Fixed above bottom dock) */}
+      <div className="mx-3 mb-20 p-2 rounded-2xl bg-white shadow-neo-soft border border-white/80 flex flex-col gap-1.5 shrink-0 z-20">
+        {/* Row 1: Modifier and Core Shell Keys */}
+        <div className="flex items-center justify-between gap-1">
+          {/* ESC Key */}
+          <button
+            type="button"
+            onClick={() => sendKey("\x1b")}
+            className="flex-1 h-8 rounded-xl bg-[#f6f8fb] shadow-neo-soft hover:shadow-neo-pressed active:shadow-neo-pressed text-[11px] font-mono font-bold text-slate-700 flex items-center justify-center border border-white/80 transition-all"
+            title="Escape"
+          >
+            ESC
+          </button>
+
+          {/* TAB Key (PowerShell / Bash Autocomplete!) */}
+          <button
+            type="button"
+            onClick={() => sendKey("\t")}
+            className="flex-1 h-8 rounded-xl bg-indigo-50/70 shadow-neo-soft hover:shadow-neo-pressed active:shadow-neo-pressed text-[11px] font-mono font-bold text-indigo-700 flex items-center justify-center border border-indigo-100 transition-all"
+            title="Tab Autocomplete"
+          >
+            TAB
+          </button>
+
+          {/* CTRL Sticky Modifier */}
+          <button
+            type="button"
+            onClick={() => setCtrlActive(!ctrlActive)}
+            className={`flex-1 h-8 rounded-xl text-[11px] font-mono font-bold flex items-center justify-center border transition-all ${
+              ctrlActive
+                ? "bg-indigo-600 text-white shadow-neo-pressed border-indigo-700"
+                : "bg-[#f6f8fb] text-slate-700 shadow-neo-soft border-white/80"
+            }`}
+            title="Control Modifier"
+          >
+            CTRL
+          </button>
+
+          {/* ALT Sticky Modifier */}
+          <button
+            type="button"
+            onClick={() => setAltActive(!altActive)}
+            className={`flex-1 h-8 rounded-xl text-[11px] font-mono font-bold flex items-center justify-center border transition-all ${
+              altActive
+                ? "bg-indigo-600 text-white shadow-neo-pressed border-indigo-700"
+                : "bg-[#f6f8fb] text-slate-700 shadow-neo-soft border-white/80"
+            }`}
+            title="Alt Modifier"
+          >
+            ALT
+          </button>
+
+          {/* Enter / Return */}
+          <button
+            type="button"
+            onClick={() => sendKey("\r")}
+            className="flex-1 h-8 rounded-xl bg-gradient-to-tr from-indigo-600 to-indigo-500 text-white shadow-neo-soft text-[11px] font-mono font-bold flex items-center justify-center active:scale-95 transition-all"
+            title="Enter / Return"
+          >
+            <CornerDownLeft className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {/* Row 2: Navigation Arrows & Common Terminal Symbols */}
+        <div className="flex items-center justify-between gap-1 text-[11px] font-mono font-semibold">
+          {/* Arrow Up (History Up) */}
+          <button
+            type="button"
+            onClick={() => sendKey("\x1b[A")}
+            className="w-8 h-7 rounded-lg bg-[#f6f8fb] shadow-neo-soft text-slate-700 flex items-center justify-center active:shadow-neo-pressed"
+            title="History Up"
+          >
+            <ChevronUp className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Arrow Down (History Down) */}
+          <button
+            type="button"
+            onClick={() => sendKey("\x1b[B")}
+            className="w-8 h-7 rounded-lg bg-[#f6f8fb] shadow-neo-soft text-slate-700 flex items-center justify-center active:shadow-neo-pressed"
+            title="History Down"
+          >
+            <ChevronDown className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Arrow Left */}
+          <button
+            type="button"
+            onClick={() => sendKey("\x1b[D")}
+            className="w-8 h-7 rounded-lg bg-[#f6f8fb] shadow-neo-soft text-slate-700 flex items-center justify-center active:shadow-neo-pressed"
+            title="Cursor Left"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Arrow Right */}
+          <button
+            type="button"
+            onClick={() => sendKey("\x1b[C")}
+            className="w-8 h-7 rounded-lg bg-[#f6f8fb] shadow-neo-soft text-slate-700 flex items-center justify-center active:shadow-neo-pressed"
+            title="Cursor Right"
+          >
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+
+          <span className="w-px h-5 bg-slate-200 mx-0.5" />
+
+          {/* Quick symbols */}
+          {["|", "/", "\\", "-", "~", "_", "$"].map((sym) => (
+            <button
+              key={sym}
+              type="button"
+              onClick={() => sendKey(sym)}
+              className="flex-1 h-7 rounded-lg bg-[#f6f8fb] shadow-neo-soft text-slate-700 flex items-center justify-center hover:text-indigo-600 active:shadow-neo-pressed"
+            >
+              {sym}
+            </button>
+          ))}
         </div>
       </div>
     </div>

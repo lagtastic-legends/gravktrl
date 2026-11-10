@@ -8,7 +8,7 @@ using System.Runtime.InteropServices;
 using System.Diagnostics;
 
 namespace GravKtrlScreenService {
-    class Program {
+    public class Program {
         [DllImport("user32.dll")]
         static extern IntPtr GetDesktopWindow();
 
@@ -326,7 +326,7 @@ namespace GravKtrlScreenService {
             stdout.Flush();
         }
 
-        static void Main(string[] args) {
+        public static void Main(string[] args) {
             InitCodec();
             Stream stdout = Console.OpenStandardOutput();
             Stream stdin = Console.OpenStandardInput();

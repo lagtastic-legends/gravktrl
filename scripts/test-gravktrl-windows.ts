@@ -234,7 +234,7 @@ async function runWindowsSuite() {
     console.log("      model.select reset back to Gemini 3.8 Flash cleanly.");
 
     // 9. Test Screen Mirroring & Remote Input (screen.info, screen.capture, /api/screen/shot, screen.input)
-    console.log("[9/9] Testing Remote Screen Mirroring & Input Injection...");
+    console.log("[9/10] Testing Remote Screen Mirroring & Input Injection...");
     const screenInfoPromise = new Promise<any>((resolve, reject) => {
       const id = 1007;
       const handler = (raw: any) => {
@@ -313,6 +313,156 @@ async function runWindowsSuite() {
       throw new Error("screen.input failed: " + JSON.stringify(inputResult));
     }
     console.log(`      screen.input verified: remote touch/click injected successfully`);
+
+    // 10. Test Interactive Terminal REPL (getOrCreatePrimarySession, sendData, terminal.data event, resize, list, kill)
+    console.log("[10/10] Testing Interactive Terminal REPL & PTY streaming...");
+    const primarySessionPromise = new Promise<any>((resolve, reject) => {
+      const id = 1010;
+      const handler = (raw: any) => {
+        try {
+          const res = JSON.parse(raw.toString());
+          if (res.id === id) {
+            ws.removeListener("message", handler);
+            resolve(res.result);
+          }
+        } catch {}
+      };
+      ws.on("message", handler);
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id, method: "terminal.getOrCreatePrimarySession", params: { cwd: process.cwd() } }));
+      setTimeout(() => reject(new Error("RPC terminal.getOrCreatePrimarySession timed out")), 5000);
+    });
+
+    const primarySession = await primarySessionPromise;
+    if (!primarySession || !primarySession.sessionId || !primarySession.active) {
+      throw new Error("Invalid terminal session response: " + JSON.stringify(primarySession));
+    }
+    console.log(`      Primary interactive terminal session online: ${primarySession.sessionId} (${primarySession.shell})`);
+
+    // Listen for terminal output event containing our unique token
+    const testToken = "GRAVKTRL_REPL_ONLINE_2026";
+    let receivedExpectedOutput = false;
+    const outputPromise = new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Timeout waiting for terminal.data containing test token")), 8000);
+      const onMsg = (raw: any) => {
+        try {
+          const parsed = JSON.parse(raw.toString());
+          if (parsed.method === "terminal.data" && parsed.params && parsed.params.sessionId === primarySession.sessionId) {
+            const chunk = parsed.params.data || "";
+            if (chunk.includes(testToken)) {
+              receivedExpectedOutput = true;
+              clearTimeout(timer);
+              ws.removeListener("message", onMsg);
+              resolve(chunk);
+            }
+          }
+        } catch {}
+      };
+      ws.on("message", onMsg);
+    });
+
+    // Send command to write token
+    const sendDataPromise = new Promise<any>((resolve, reject) => {
+      const id = 1011;
+      const handler = (raw: any) => {
+        try {
+          const res = JSON.parse(raw.toString());
+          if (res.id === id) {
+            ws.removeListener("message", handler);
+            resolve(res.result);
+          }
+        } catch {}
+      };
+      ws.on("message", handler);
+      ws.send(JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        method: "terminal.sendData",
+        params: { sessionId: primarySession.sessionId, data: `Write-Host "${testToken}"\r\n` }
+      }));
+      setTimeout(() => reject(new Error("RPC terminal.sendData timed out")), 5000);
+    });
+
+    await sendDataPromise;
+    console.log("      Sent Write-Host command into interactive PTY session...");
+
+    await outputPromise;
+    console.log(`      Interactive PTY stream verified: received output containing "${testToken}"`);
+
+    // Test terminal.resize
+    const resizePromise = new Promise<any>((resolve, reject) => {
+      const id = 1012;
+      const handler = (raw: any) => {
+        try {
+          const res = JSON.parse(raw.toString());
+          if (res.id === id) {
+            ws.removeListener("message", handler);
+            resolve(res.result);
+          }
+        } catch {}
+      };
+      ws.on("message", handler);
+      ws.send(JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        method: "terminal.resize",
+        params: { sessionId: primarySession.sessionId, cols: 120, rows: 40 }
+      }));
+      setTimeout(() => reject(new Error("RPC terminal.resize timed out")), 4000);
+    });
+    const resizeRes = await resizePromise;
+    if (!resizeRes || !resizeRes.success) {
+      throw new Error("terminal.resize failed: " + JSON.stringify(resizeRes));
+    }
+    console.log(`      terminal.resize verified: cols=120, rows=40 applied`);
+
+    // Test terminal.listSessions
+    const listSessionsPromise = new Promise<any>((resolve, reject) => {
+      const id = 1013;
+      const handler = (raw: any) => {
+        try {
+          const res = JSON.parse(raw.toString());
+          if (res.id === id) {
+            ws.removeListener("message", handler);
+            resolve(res.result);
+          }
+        } catch {}
+      };
+      ws.on("message", handler);
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id, method: "terminal.listSessions", params: {} }));
+      setTimeout(() => reject(new Error("RPC terminal.listSessions timed out")), 4000);
+    });
+    const listRes = await listSessionsPromise;
+    if (!listRes || !Array.isArray(listRes.sessions) || listRes.sessions.length === 0) {
+      throw new Error("terminal.listSessions returned empty or invalid list: " + JSON.stringify(listRes));
+    }
+    console.log(`      terminal.listSessions verified: ${listRes.sessions.length} active session(s) listed`);
+
+    // Test terminal.killSession
+    const killSessionPromise = new Promise<any>((resolve, reject) => {
+      const id = 1014;
+      const handler = (raw: any) => {
+        try {
+          const res = JSON.parse(raw.toString());
+          if (res.id === id) {
+            ws.removeListener("message", handler);
+            resolve(res.result);
+          }
+        } catch {}
+      };
+      ws.on("message", handler);
+      ws.send(JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        method: "terminal.killSession",
+        params: { sessionId: primarySession.sessionId }
+      }));
+      setTimeout(() => reject(new Error("RPC terminal.killSession timed out")), 4000);
+    });
+    const killRes = await killSessionPromise;
+    if (!killRes || !killRes.success) {
+      throw new Error("terminal.killSession failed: " + JSON.stringify(killRes));
+    }
+    console.log(`      terminal.killSession verified: primary session terminated cleanly`);
 
     ws.close();
     console.log("\n==================================================================");

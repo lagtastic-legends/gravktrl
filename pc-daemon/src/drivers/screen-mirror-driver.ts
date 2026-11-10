@@ -62,49 +62,28 @@ export class ScreenMirrorDriver {
     this.exePath = path.join(this.baseDir, "pc-daemon", "bin", "gravktrl-screen.exe");
     this.csPath = path.join(this.baseDir, "pc-daemon", "src", "drivers", "screen-service.cs");
 
-    this.ensureBinaryExists();
     this.startChildProcess();
   }
 
   /**
-   * Automatically compiles gravktrl-screen.exe via csc.exe if missing.
-   */
-  private ensureBinaryExists(): void {
-    if (fs.existsSync(this.exePath)) return;
-
-    const binDir = path.dirname(this.exePath);
-    if (!fs.existsSync(binDir)) {
-      fs.mkdirSync(binDir, { recursive: true });
-    }
-
-    const cscPath = "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe";
-    if (fs.existsSync(cscPath) && fs.existsSync(this.csPath)) {
-      try {
-        console.log("[ScreenMirrorDriver] Compiling native screen capture service via csc.exe...");
-        execSync(`"${cscPath}" /nologo /optimize+ /target:exe /out:"${this.exePath}" /r:System.Drawing.dll "${this.csPath}"`, {
-          timeout: 10000,
-          windowsHide: true,
-        });
-        console.log("[ScreenMirrorDriver] gravktrl-screen.exe compiled successfully.");
-      } catch (err) {
-        console.error("[ScreenMirrorDriver] Failed to compile screen-service.cs:", err);
-      }
-    }
-  }
-
-  /**
-   * Spawns the persistent screen capture child process.
+   * Spawns the persistent screen capture child process via PowerShell in-memory .NET runtime.
+   * This is 100% compliant with Windows Application Control (WDAC/AppLocker) policies.
    */
   private startChildProcess(): void {
     if (this.child || this.isStarting) return;
-    if (!fs.existsSync(this.exePath)) {
-      console.warn("[ScreenMirrorDriver] Binary not available at:", this.exePath);
+    if (!fs.existsSync(this.csPath)) {
+      console.warn("[ScreenMirrorDriver] screen-service.cs not found at:", this.csPath);
       return;
     }
 
     this.isStarting = true;
     try {
-      this.child = spawn(this.exePath, [], {
+      const psScript = `
+$code = Get-Content -LiteralPath "${this.csPath}" -Raw
+Add-Type -TypeDefinition $code -ReferencedAssemblies "System.Drawing"
+[GravKtrlScreenService.Program]::Main(@())
+`;
+      this.child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", psScript], {
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
       });

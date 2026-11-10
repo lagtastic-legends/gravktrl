@@ -150,6 +150,27 @@ export interface ScreenInputEvent {
   target?: "desktop" | "antigravity";
 }
 
+export interface TerminalSessionInfo {
+  sessionId: string;
+  name: string;
+  shell: string;
+  cwd: string;
+  createdAt: string;
+  active: boolean;
+  cols: number;
+  rows: number;
+}
+
+export interface TerminalDataEvent {
+  sessionId: string;
+  data: string;
+}
+
+export interface TerminalExitEvent {
+  sessionId: string;
+  exitCode: number;
+}
+
 export type ConnectionState = "disconnected" | "connecting" | "connected" | "authenticated" | "error";
 
 type EventCallback<T = unknown> = (data: T) => void;
@@ -664,6 +685,37 @@ export class GravKtrlClient {
 
   public approveCommand(approvalId: string): Promise<{ executionId: string; status: "started" }> {
     return this.call("terminal.approve", { approvalId });
+  }
+
+  // --- Interactive Terminal REPL Sessions ---
+  public createTerminalSession(options?: {
+    cwd?: string;
+    shell?: string;
+    cols?: number;
+    rows?: number;
+    name?: string;
+  }): Promise<TerminalSessionInfo> {
+    return this.call<TerminalSessionInfo>("terminal.createSession", options as unknown as Record<string, unknown>);
+  }
+
+  public getOrCreatePrimaryTerminalSession(cwd?: string): Promise<TerminalSessionInfo> {
+    return this.call<TerminalSessionInfo>("terminal.getOrCreatePrimarySession", { cwd });
+  }
+
+  public sendTerminalData(sessionId: string, data: string): Promise<{ success: boolean }> {
+    return this.call("terminal.sendData", { sessionId, data });
+  }
+
+  public resizeTerminal(sessionId: string, cols: number, rows: number): Promise<{ success: boolean }> {
+    return this.call("terminal.resize", { sessionId, cols, rows });
+  }
+
+  public killTerminalSession(sessionId: string): Promise<{ success: boolean }> {
+    return this.call("terminal.killSession", { sessionId });
+  }
+
+  public listTerminalSessions(): Promise<{ sessions: TerminalSessionInfo[] }> {
+    return this.call("terminal.listSessions");
   }
 
   public getGitStatus(): Promise<GitStatusData> {

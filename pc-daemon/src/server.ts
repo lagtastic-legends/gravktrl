@@ -12,6 +12,7 @@ import { WorkspaceWatcher } from "./drivers/workspace-watcher.js";
 import { AntigravityConversationManager } from "./drivers/antigravity-conversation-manager.js";
 import { ModelManager, type ModelUsageData, type ModelInfo } from "./drivers/model-manager.js";
 import { ScreenMirrorDriver, type ScreenInfo, type ScreenInputEvent } from "./drivers/screen-mirror-driver.js";
+import { InteractiveTerminalManager, type TerminalSessionInfo, type TerminalDataEvent } from "./drivers/interactive-terminal-manager.js";
 import { renderDesktopHtml } from "./desktop-ui.js";
 
 export interface JsonRpcRequest {
@@ -78,6 +79,7 @@ export class GravKtrlServer {
   private conversationManager: AntigravityConversationManager;
   private modelManager: ModelManager;
   private screenMirror: ScreenMirrorDriver;
+  private interactiveTerminal: InteractiveTerminalManager;
   private authenticatedSockets: Set<WebSocket> = new Set();
 
   private agentDriver?: AgentDriver;
@@ -93,6 +95,19 @@ export class GravKtrlServer {
     this.conversationManager = new AntigravityConversationManager();
     this.modelManager = new ModelManager(baseDir);
     this.screenMirror = new ScreenMirrorDriver(baseDir);
+    this.interactiveTerminal = new InteractiveTerminalManager();
+
+    this.interactiveTerminal.onData((event) => {
+      this.broadcastNotification("terminal.data", event as unknown as Record<string, unknown>);
+    });
+
+    this.interactiveTerminal.onExit((event) => {
+      this.broadcastNotification("terminal.sessionExit", event as unknown as Record<string, unknown>);
+    });
+
+    this.interactiveTerminal.onApprovalRequired((event) => {
+      this.broadcastNotification("approval.required", event as unknown as Record<string, unknown>);
+    });
 
     this.workspaceWatcher.onFileChange((event) => {
       this.broadcastNotification("agent.fileModified", event as unknown as Record<string, unknown>);
@@ -384,7 +399,7 @@ export class GravKtrlServer {
         activeWorkspace: activeWs,
         workspaces,
         cdpActive: cdpHealth.healthy,
-        version: "1.1.0",
+        version: "1.4.0",
       });
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(html);
@@ -783,6 +798,12 @@ export class GravKtrlServer {
               error: { code: -32602, message: "Missing parameter: approvalId" },
             };
           }
+
+          // Check if it's an interactive terminal approval
+          if (this.interactiveTerminal.approveCommand(approvalId)) {
+            return { jsonrpc: "2.0", id, result: { success: true, message: "Interactive command approved" } };
+          }
+
           if (!this.terminalDriver) {
             return {
               jsonrpc: "2.0",
@@ -792,6 +813,70 @@ export class GravKtrlServer {
           }
           const res = await this.terminalDriver.approveExecution(approvalId);
           return { jsonrpc: "2.0", id, result: res };
+        }
+
+        // INTERACTIVE PTY TERMINAL REPL
+        case "terminal.createSession": {
+          const session = this.interactiveTerminal.createSession({
+            cwd: (params.cwd as string) || activeWs,
+            shell: params.shell as string,
+            cols: params.cols as number,
+            rows: params.rows as number,
+            name: params.name as string,
+          });
+          return { jsonrpc: "2.0", id, result: session };
+        }
+
+        case "terminal.getOrCreatePrimarySession": {
+          const session = this.interactiveTerminal.getOrCreatePrimarySession((params.cwd as string) || activeWs);
+          return { jsonrpc: "2.0", id, result: session };
+        }
+
+        case "terminal.sendData": {
+          const sessionId = params.sessionId as string;
+          const data = params.data as string;
+          if (!sessionId || data === undefined) {
+            return {
+              jsonrpc: "2.0",
+              id,
+              error: { code: -32602, message: "Missing sessionId or data" },
+            };
+          }
+          const success = this.interactiveTerminal.write(sessionId, data);
+          return { jsonrpc: "2.0", id, result: { success } };
+        }
+
+        case "terminal.resize": {
+          const sessionId = params.sessionId as string;
+          const cols = (params.cols as number) || 80;
+          const rows = (params.rows as number) || 24;
+          if (!sessionId) {
+            return {
+              jsonrpc: "2.0",
+              id,
+              error: { code: -32602, message: "Missing parameter: sessionId" },
+            };
+          }
+          const success = this.interactiveTerminal.resize(sessionId, cols, rows);
+          return { jsonrpc: "2.0", id, result: { success } };
+        }
+
+        case "terminal.killSession": {
+          const sessionId = params.sessionId as string;
+          if (!sessionId) {
+            return {
+              jsonrpc: "2.0",
+              id,
+              error: { code: -32602, message: "Missing parameter: sessionId" },
+            };
+          }
+          const success = this.interactiveTerminal.kill(sessionId);
+          return { jsonrpc: "2.0", id, result: { success } };
+        }
+
+        case "terminal.listSessions": {
+          const sessions = this.interactiveTerminal.listSessions();
+          return { jsonrpc: "2.0", id, result: { sessions } };
         }
 
         // GIT OPERATIONS
@@ -933,6 +1018,7 @@ export class GravKtrlServer {
     this.conversationManager.dispose();
     this.modelManager.dispose();
     this.screenMirror.dispose();
+    this.interactiveTerminal.dispose();
     return new Promise((resolve) => {
       for (const socket of this.authenticatedSockets) {
         try {
