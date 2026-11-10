@@ -13,6 +13,7 @@ import { AntigravityConversationManager } from "./drivers/antigravity-conversati
 import { ModelManager, type ModelUsageData, type ModelInfo } from "./drivers/model-manager.js";
 import { ScreenMirrorDriver, type ScreenInfo, type ScreenInputEvent } from "./drivers/screen-mirror-driver.js";
 import { InteractiveTerminalManager, type TerminalSessionInfo, type TerminalDataEvent } from "./drivers/interactive-terminal-manager.js";
+import { AntigravityHubDriver, type AntigravityRemoteControlStatus } from "./drivers/antigravity-hub-driver.js";
 import { renderDesktopHtml } from "./desktop-ui.js";
 
 export interface JsonRpcRequest {
@@ -80,6 +81,7 @@ export class GravKtrlServer {
   private modelManager: ModelManager;
   private screenMirror: ScreenMirrorDriver;
   private interactiveTerminal: InteractiveTerminalManager;
+  private antigravityHub: AntigravityHubDriver;
   private authenticatedSockets: Set<WebSocket> = new Set();
 
   private agentDriver?: AgentDriver;
@@ -96,6 +98,7 @@ export class GravKtrlServer {
     this.modelManager = new ModelManager(baseDir);
     this.screenMirror = new ScreenMirrorDriver(baseDir);
     this.interactiveTerminal = new InteractiveTerminalManager();
+    this.antigravityHub = new AntigravityHubDriver();
 
     this.interactiveTerminal.onData((event) => {
       this.broadcastNotification("terminal.data", event as unknown as Record<string, unknown>);
@@ -389,6 +392,7 @@ export class GravKtrlServer {
       const activeWs = this.workspaceManager.getActiveWorkspace();
       const workspaces = this.workspaceManager.listWorkspaces();
       const cdpHealth = await this.telemetry.checkCdpHealth();
+      const rcStatus = await this.antigravityHub.getRemoteControlInfo();
       const html = renderDesktopHtml({
         hostname: beacon.name,
         port: this.port,
@@ -399,7 +403,8 @@ export class GravKtrlServer {
         activeWorkspace: activeWs,
         workspaces,
         cdpActive: cdpHealth.healthy,
-        version: "1.4.0",
+        version: "1.5.0",
+        remoteControl: rcStatus,
       });
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(html);
@@ -417,6 +422,44 @@ export class GravKtrlServer {
       }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ success: true, message: "Launch signaled" }));
+      return;
+    }
+
+    // Antigravity Remote Control Status: GET /api/antigravity/remote-control
+    if (req.method === "GET" && pathname === "/api/antigravity/remote-control") {
+      const rcStatus = await this.antigravityHub.getRemoteControlInfo();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(rcStatus));
+      return;
+    }
+
+    // Antigravity Remote Control Toggle: POST /api/antigravity/remote-control/toggle
+    if (req.method === "POST" && pathname === "/api/antigravity/remote-control/toggle") {
+      let bodyStr = "";
+      req.on("data", (chunk) => { bodyStr += chunk; });
+      req.on("end", async () => {
+        try {
+          const body = JSON.parse(bodyStr || "{}");
+          const enabled = Boolean(body.enabled);
+          const hostname = body.hostname as string | undefined;
+          const result = await this.antigravityHub.setRemoteControl(enabled, hostname);
+          this.broadcastNotification("antigravity.remoteControlChanged", result.status as unknown as Record<string, unknown>);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(result.status));
+        } catch (err: any) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: err.message || "Failed to update remote control" }));
+        }
+      });
+      return;
+    }
+
+    // Antigravity Remote Control Browser Redirect: GET /api/antigravity/remote-control/open
+    if (req.method === "GET" && pathname === "/api/antigravity/remote-control/open") {
+      const rcStatus = await this.antigravityHub.getRemoteControlInfo();
+      const targetUrl = rcStatus.url || "https://antigravity.google.com";
+      res.writeHead(302, { Location: targetUrl });
+      res.end();
       return;
     }
 
@@ -985,6 +1028,40 @@ export class GravKtrlServer {
           const inputEvent = params as unknown as ScreenInputEvent;
           const res = await this.screenMirror.injectInput(inputEvent);
           return { jsonrpc: "2.0", id, result: res };
+        }
+
+        // ANTIGRAVITY NATIVE REMOTE CONTROL ("Work with local agents from another device")
+        case "antigravity.getRemoteControl": {
+          const status = await this.antigravityHub.getRemoteControlInfo();
+          return { jsonrpc: "2.0", id, result: status };
+        }
+
+        case "antigravity.setRemoteControl": {
+          const enabled = Boolean(params.enabled);
+          const hostname = params.hostname as string | undefined;
+          const result = await this.antigravityHub.setRemoteControl(enabled, hostname);
+          this.broadcastNotification("antigravity.remoteControlChanged", result.status as unknown as Record<string, unknown>);
+          return { jsonrpc: "2.0", id, result: result.status };
+        }
+
+        case "antigravity.getCompanionUrl": {
+          const status = await this.antigravityHub.getRemoteControlInfo();
+          const email = params.email as string | undefined;
+          let directUrl = status.url || "";
+          if (email && directUrl) {
+            directUrl = `https://accounts.google.com/AccountChooser?Email=${encodeURIComponent(email)}&continue=${encodeURIComponent(directUrl)}`;
+          }
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              url: directUrl,
+              rawUrl: status.url,
+              instanceId: status.instanceId,
+              companionOrigin: status.companionOrigin,
+              enabled: status.enabled,
+            },
+          };
         }
 
         default:

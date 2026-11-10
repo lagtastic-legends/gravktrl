@@ -171,6 +171,18 @@ export interface TerminalExitEvent {
   exitCode: number;
 }
 
+export interface AntigravityRemoteControlInfo {
+  available: boolean;
+  enabled: boolean;
+  instanceId: string;
+  companionOrigin: string;
+  url: string;
+  hostname: string;
+  httpPort?: number;
+  pid?: number;
+  error?: string;
+}
+
 export type ConnectionState = "disconnected" | "connecting" | "connected" | "authenticated" | "error";
 
 type EventCallback<T = unknown> = (data: T) => void;
@@ -728,6 +740,35 @@ export class GravKtrlClient {
 
   public gitCommitAndPush(message: string): Promise<{ success: boolean; log: string }> {
     return this.call<{ success: boolean; log: string }>("git.commitAndPush", { message });
+  }
+
+  // --- Antigravity Native Remote Control ("Work with local agents from another device") ---
+  public getAntigravityRemoteControl(): Promise<AntigravityRemoteControlInfo> {
+    return this.call<AntigravityRemoteControlInfo>("antigravity.getRemoteControl", {});
+  }
+
+  public setAntigravityRemoteControl(enabled: boolean, hostname?: string): Promise<AntigravityRemoteControlInfo> {
+    return this.call<AntigravityRemoteControlInfo>("antigravity.setRemoteControl", { enabled, hostname });
+  }
+
+  public getAntigravityCompanionUrl(email?: string): Promise<{
+    url: string;
+    rawUrl: string;
+    instanceId: string;
+    companionOrigin: string;
+    enabled: boolean;
+  }> {
+    return this.call<{
+      url: string;
+      rawUrl: string;
+      instanceId: string;
+      companionOrigin: string;
+      enabled: boolean;
+    }>("antigravity.getCompanionUrl", { email });
+  }
+
+  public onAntigravityRemoteControlChange(callback: (status: AntigravityRemoteControlInfo) => void): () => void {
+    return this.on("antigravity.remoteControlChanged", callback);
   }
 
   // --- Voice Input Helper (Web Speech API) ---

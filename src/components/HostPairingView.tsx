@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import type { GravKtrlClient, PcProfile, TelemetryData, ConnectionState } from "../lib/gravktrl-client";
+import type { GravKtrlClient, PcProfile, TelemetryData, ConnectionState, AntigravityRemoteControlInfo } from "../lib/gravktrl-client";
 
 interface HostPairingViewProps {
   client: GravKtrlClient;
@@ -31,6 +31,10 @@ export const HostPairingView: React.FC<HostPairingViewProps> = ({
   const [isTokenVisible, setIsTokenVisible] = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(true);
 
+  // Native Antigravity Remote Control state
+  const [remoteControl, setRemoteControl] = useState<AntigravityRemoteControlInfo | null>(null);
+  const [isRcLoading, setIsRcLoading] = useState(false);
+
   // Micro Toast
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastAlert, setToastAlert] = useState(false);
@@ -40,7 +44,20 @@ export const HostPairingView: React.FC<HostPairingViewProps> = ({
 
   useEffect(() => {
     loadProfiles();
+    fetchRemoteControl();
+    const unsub = client.onAntigravityRemoteControlChange((status) => {
+      setRemoteControl(status);
+    });
+    return () => {
+      unsub();
+    };
   }, []);
+
+  const fetchRemoteControl = () => {
+    client.getAntigravityRemoteControl()
+      .then(setRemoteControl)
+      .catch(() => {});
+  };
 
   useEffect(() => {
     if (telemetry?.cpuUsagePercent !== undefined) {
@@ -68,6 +85,20 @@ export const HostPairingView: React.FC<HostPairingViewProps> = ({
     client.saveProfile(p);
     client.connect(p);
     showToast(`Switched to profile: ${p.name}`);
+  };
+
+  const handleToggleRemoteControl = async () => {
+    setIsRcLoading(true);
+    try {
+      const next = !(remoteControl?.enabled);
+      const res = await client.setAntigravityRemoteControl(next);
+      setRemoteControl(res);
+      showToast(next ? "Remote Control enabled on PC!" : "Remote Control disabled on PC.");
+    } catch (err: any) {
+      showToast("Failed to update Remote Control", true);
+    } finally {
+      setIsRcLoading(false);
+    }
   };
 
   const handleCopyUri = () => {
@@ -244,6 +275,80 @@ export const HostPairingView: React.FC<HostPairingViewProps> = ({
             <span className="font-mono text-[11px] font-medium">RPC 2.0 OK</span>
           </div>
         </div>
+      </div>
+
+      {/* Native Antigravity Remote Control ("Work with local agents from another device") */}
+      <div className="bg-white rounded-2xl p-4 shadow-neo-flat flex flex-col gap-3 border border-white/60">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-indigo-600 text-[18px]">cell_tower</span>
+            <span className="text-sm font-semibold text-slate-800 tracking-tight">Remote Control</span>
+            <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+              remoteControl?.enabled ? "bg-emerald-50 text-emerald-600 border border-emerald-200" : "bg-slate-100 text-slate-500 border border-slate-200"
+            }`}>
+              {remoteControl?.enabled ? "Active" : "Disabled"}
+            </span>
+          </div>
+          {isRcLoading && (
+            <span className="text-[10px] text-slate-400 animate-pulse font-medium">Syncing...</span>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between bg-slate-50/80 p-3 rounded-xl border border-slate-100">
+          <div className="flex flex-col pr-3">
+            <span className="text-xs font-semibold text-slate-800">Enable Remote Control</span>
+            <span className="text-[11px] text-slate-500 mt-0.5 leading-tight">Work with local agents from another device.</span>
+          </div>
+          <button
+            onClick={handleToggleRemoteControl}
+            disabled={isRcLoading}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+              remoteControl?.enabled ? "bg-emerald-500" : "bg-slate-300"
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                remoteControl?.enabled ? "translate-x-5" : "translate-x-0"
+              }`}
+            />
+          </button>
+        </div>
+
+        {remoteControl?.enabled && (
+          <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-500 font-medium">Host Device Name</span>
+              <span className="font-mono text-slate-700 font-semibold">{remoteControl.hostname || "Kaihatsu-sha"}</span>
+            </div>
+
+            {remoteControl.url && (
+              <div className="flex flex-col gap-1.5 mt-1">
+                <span className="text-[11px] font-medium text-slate-500">Antigravity Cloud Companion</span>
+                <div className="flex items-center gap-1.5 bg-slate-100/80 px-2.5 py-1.5 rounded-lg border border-slate-200/80">
+                  <span className="text-[11px] font-mono text-slate-700 truncate flex-1">{remoteControl.url}</span>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(remoteControl.url);
+                      showToast("Companion URL copied!");
+                    }}
+                    className="p-1 text-slate-500 hover:text-slate-800 text-[10px] font-medium"
+                  >
+                    Copy
+                  </button>
+                </div>
+                <a
+                  href={remoteControl.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-1 flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-xs font-semibold shadow-sm hover:opacity-95 transition"
+                >
+                  <span className="material-symbols-outlined text-[15px]">open_in_new</span>
+                  <span>Open Antigravity Cloud Companion</span>
+                </a>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Real-Time Telemetry HUD Section */}

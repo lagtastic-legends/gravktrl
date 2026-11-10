@@ -32,6 +32,7 @@ import type {
   ChatMessage,
   ModelInfo,
   ModelUsageData,
+  AntigravityRemoteControlInfo,
 } from "../lib/gravktrl-client";
 
 interface AgentConsoleViewProps {
@@ -107,6 +108,7 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
   const [attachMode, setAttachMode] = useState<"cdp" | "win32" | "fallback">("cdp");
   const [showActivity, setShowActivity] = useState<boolean>(false);
   const [recentFiles, setRecentFiles] = useState<FileActivity[]>([]);
+  const [rcInfo, setRcInfo] = useState<AntigravityRemoteControlInfo | null>(null);
   
   // Model Selection & Quota Limits State
   const [showModelModal, setShowModelModal] = useState<boolean>(false);
@@ -280,6 +282,14 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
       })
       .catch(() => {});
 
+    client.getAntigravityRemoteControl()
+      .then(setRcInfo)
+      .catch(() => {});
+
+    const unsubRc = client.onAntigravityRemoteControlChange((status) => {
+      setRcInfo(status);
+    });
+
     // Subscribe to real-time conversation and project list updates
     const unsubConvs = client.on("conversation.listUpdated", (data: any) => {
       if (data && data.projects) {
@@ -385,6 +395,7 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
       unsubFiles();
       unsubConvs();
       unsubUsage();
+      unsubRc();
     };
   }, [client]);
 
@@ -689,6 +700,20 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[9px] font-bold">
                 STAGED
               </span>
+            )}
+
+            {/* Native Antigravity Remote Control Companion Link */}
+            {rcInfo?.enabled && rcInfo.url && (
+              <a
+                href={rcInfo.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Open Antigravity Cloud Companion"
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 text-[9px] font-bold hover:bg-purple-100 transition"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
+                <span>COMPANION</span>
+              </a>
             )}
           </div>
 

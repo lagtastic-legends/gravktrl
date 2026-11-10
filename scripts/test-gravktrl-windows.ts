@@ -464,6 +464,144 @@ async function runWindowsSuite() {
     }
     console.log(`      terminal.killSession verified: primary session terminated cleanly`);
 
+    // 11. Test Native Antigravity Remote Control ("Work with local agents from another device")
+    console.log("[11/11] Testing Native Antigravity Remote Control (Connect-RPC & JetboxState)...");
+    
+    // HTTP GET /api/antigravity/remote-control
+    const rcHttpRes = await fetch(`http://127.0.0.1:${TEST_PORT}/api/antigravity/remote-control`);
+    if (!rcHttpRes.ok) {
+      throw new Error(`GET /api/antigravity/remote-control returned status ${rcHttpRes.status}`);
+    }
+    const rcHttpData = await rcHttpRes.json();
+    if (!rcHttpData.available || !rcHttpData.instanceId) {
+      throw new Error("Antigravity Remote Control not detected on language server: " + JSON.stringify(rcHttpData));
+    }
+    console.log(`      Antigravity Language Server online: :${rcHttpData.httpPort} (Instance: ${rcHttpData.instanceId})`);
+
+    // JSON-RPC antigravity.getRemoteControl
+    const getRcPromise = new Promise<any>((resolve, reject) => {
+      const id = 1015;
+      const handler = (raw: any) => {
+        try {
+          const res = JSON.parse(raw.toString());
+          if (res.id === id) {
+            ws.removeListener("message", handler);
+            resolve(res.result);
+          }
+        } catch {}
+      };
+      ws.on("message", handler);
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id, method: "antigravity.getRemoteControl", params: {} }));
+      setTimeout(() => reject(new Error("RPC antigravity.getRemoteControl timed out")), 5000);
+    });
+    const getRcData = await getRcPromise;
+    if (!getRcData || !getRcData.available) {
+      throw new Error("RPC antigravity.getRemoteControl returned invalid data: " + JSON.stringify(getRcData));
+    }
+    console.log(`      antigravity.getRemoteControl verified: companionOrigin=${getRcData.companionOrigin}`);
+
+    // Listen for WebSocket notification: antigravity.remoteControlChanged
+    let receivedRcNotification = false;
+    const rcNotificationPromise = new Promise<any>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Timeout waiting for antigravity.remoteControlChanged notification")), 5000);
+      const onMsg = (raw: any) => {
+        try {
+          const parsed = JSON.parse(raw.toString());
+          if (parsed.method === "antigravity.remoteControlChanged") {
+            receivedRcNotification = true;
+            clearTimeout(timer);
+            ws.removeListener("message", onMsg);
+            resolve(parsed.params);
+          }
+        } catch {}
+      };
+      ws.on("message", onMsg);
+    });
+
+    // JSON-RPC antigravity.setRemoteControl (Enable)
+    const setRcPromise = new Promise<any>((resolve, reject) => {
+      const id = 1016;
+      const handler = (raw: any) => {
+        try {
+          const res = JSON.parse(raw.toString());
+          if (res.id === id) {
+            ws.removeListener("message", handler);
+            resolve(res.result);
+          }
+        } catch {}
+      };
+      ws.on("message", handler);
+      ws.send(JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        method: "antigravity.setRemoteControl",
+        params: { enabled: true, hostname: "GravKtrl Verification Rig" }
+      }));
+      setTimeout(() => reject(new Error("RPC antigravity.setRemoteControl timed out")), 5000);
+    });
+    const setRcData = await setRcPromise;
+    if (!setRcData || setRcData.enabled !== true) {
+      throw new Error("RPC antigravity.setRemoteControl failed to enable: " + JSON.stringify(setRcData));
+    }
+    console.log(`      antigravity.setRemoteControl (ENABLE) verified: url=${setRcData.url}`);
+
+    await rcNotificationPromise;
+    console.log("      antigravity.remoteControlChanged WebSocket event received cleanly");
+
+    // JSON-RPC antigravity.getCompanionUrl
+    const getUrlPromise = new Promise<any>((resolve, reject) => {
+      const id = 1017;
+      const handler = (raw: any) => {
+        try {
+          const res = JSON.parse(raw.toString());
+          if (res.id === id) {
+            ws.removeListener("message", handler);
+            resolve(res.result);
+          }
+        } catch {}
+      };
+      ws.on("message", handler);
+      ws.send(JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        method: "antigravity.getCompanionUrl",
+        params: { email: "devra@google.com" }
+      }));
+      setTimeout(() => reject(new Error("RPC antigravity.getCompanionUrl timed out")), 4000);
+    });
+    const urlData = await getUrlPromise;
+    if (!urlData || !urlData.url || !urlData.url.includes("AccountChooser")) {
+      throw new Error("antigravity.getCompanionUrl returned invalid URL: " + JSON.stringify(urlData));
+    }
+    console.log(`      antigravity.getCompanionUrl verified: ${urlData.url.slice(0, 75)}...`);
+
+    // Reset Remote Control to disabled state cleanly
+    const resetRcPromise = new Promise<any>((resolve, reject) => {
+      const id = 1018;
+      const handler = (raw: any) => {
+        try {
+          const res = JSON.parse(raw.toString());
+          if (res.id === id) {
+            ws.removeListener("message", handler);
+            resolve(res.result);
+          }
+        } catch {}
+      };
+      ws.on("message", handler);
+      ws.send(JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        method: "antigravity.setRemoteControl",
+        params: { enabled: false }
+      }));
+      setTimeout(() => reject(new Error("RPC antigravity.setRemoteControl reset timed out")), 5000);
+    });
+    const resetData = await resetRcPromise;
+    if (!resetData || resetData.enabled !== false) {
+      throw new Error("Failed to reset Remote Control: " + JSON.stringify(resetData));
+    }
+    console.log("      antigravity.setRemoteControl reset to disabled state cleanly");
+
     ws.close();
     console.log("\n==================================================================");
     console.log("  ✓ ALL TESTS PASSED! GRAVKTRL WINDOWS APP & DUAL DRIVER ARE READY");

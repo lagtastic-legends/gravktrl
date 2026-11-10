@@ -9,6 +9,13 @@ export interface DesktopUiParams {
   workspaces: Array<{ path: string; name: string }>;
   cdpActive: boolean;
   version: string;
+  remoteControl?: {
+    available: boolean;
+    enabled: boolean;
+    instanceId: string;
+    url: string;
+    hostname: string;
+  };
 }
 
 export function renderDesktopHtml(params: DesktopUiParams): string {
@@ -256,6 +263,110 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
     }
     .feed-item.created { border-left-color: var(--accent-emerald); }
     .feed-item.deleted { border-left-color: #ef4444; }
+
+    /* Remote Control Card & Toggle */
+    .rc-toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 8px;
+    }
+    .rc-toggle-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+    .rc-toggle-desc {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 24px;
+      flex-shrink: 0;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: #334155;
+      transition: .25s cubic-bezier(0.4, 0, 0.2, 1);
+      border-radius: 24px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background-color: #ffffff;
+      transition: .25s cubic-bezier(0.4, 0, 0.2, 1);
+      border-radius: 50%;
+    }
+    input:checked + .slider {
+      background: linear-gradient(135deg, #10b981, #06b6d4);
+    }
+    input:checked + .slider:before {
+      transform: translateX(20px);
+    }
+    .rc-input {
+      width: 100%;
+      background: #030712;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      color: var(--text-main);
+      font-size: 12px;
+      font-family: inherit;
+      outline: none;
+      box-sizing: border-box;
+      margin-top: 4px;
+    }
+    .rc-input:focus {
+      border-color: var(--accent-purple);
+    }
+    .rc-url-box {
+      display: flex;
+      align-items: center;
+      background: #030712;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 6px 4px 10px;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .rc-url-text {
+      flex: 1;
+      font-size: 11px;
+      font-family: monospace;
+      color: var(--accent-cyan);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .btn-copy {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #f8fafc;
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 10px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-copy:hover {
+      background: #334155;
+    }
     .feed-path {
       font-family: ui-monospace, monospace;
       color: #e2e8f0;
@@ -346,6 +457,45 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
         <div>
           <div class="stat-label">Tailscale VPN</div>
           <div class="stat-val">${params.tailscaleIp ? `${params.tailscaleIp}:${params.port}` : "Not active"}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- NATIVE ANTIGRAVITY REMOTE CONTROL (WORK WITH LOCAL AGENTS FROM ANOTHER DEVICE) -->
+    <div class="card" id="remoteControlCard">
+      <div class="card-title">
+        <span>Remote Control</span>
+        <span id="rcBadge" class="mode-pill ${params.remoteControl?.enabled ? "mode-cdp" : "mode-win32"}">
+          ${params.remoteControl?.enabled ? "ACTIVE" : "DISABLED"}
+        </span>
+      </div>
+      <div class="rc-toggle-row">
+        <div>
+          <div class="rc-toggle-label">Enable Remote Control</div>
+          <div class="rc-toggle-desc">Work with local agents from another device.</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="rcToggle" ${params.remoteControl?.enabled ? "checked" : ""} onchange="onToggleRemoteControl(this.checked)">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div id="rcDetails" style="${params.remoteControl?.enabled ? "" : "display: none;"} margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px;">
+        <div style="margin-bottom: 8px;">
+          <div class="stat-label">Device Name</div>
+          <input type="text" id="rcHostnameInput" class="rc-input" value="${params.remoteControl?.hostname || params.hostname}" placeholder="Enter device name..." onblur="onUpdateHostname(this.value)">
+        </div>
+        <div style="margin-top: 8px;">
+          <div class="stat-label">Antigravity Cloud Companion Link</div>
+          <div class="rc-url-box">
+            <span class="rc-url-text" id="rcUrlText">${params.remoteControl?.url || (params.remoteControl?.instanceId ? "https://antigravity.google.com/r/" + encodeURIComponent(params.remoteControl.instanceId) : "https://antigravity.google.com/r/")}</span>
+            <button class="btn-copy" onclick="copyRcLink()" title="Copy Companion Link">Copy</button>
+          </div>
+          <div style="display: flex; gap: 8px; margin-top: 8px;">
+            <a href="/api/antigravity/remote-control/open" target="_blank" class="btn btn-primary" style="flex: 1; padding: 6px 12px; font-size: 11px;">
+              🌐 Open Companion in Browser
+            </a>
+          </div>
         </div>
       </div>
     </div>
@@ -461,6 +611,57 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
       feed.insertBefore(item, feed.firstChild);
       if (feed.children.length > 30) {
         feed.removeChild(feed.lastChild);
+      }
+    }
+
+    // Remote Control management
+    async function onToggleRemoteControl(enabled) {
+      const badge = document.getElementById("rcBadge");
+      const details = document.getElementById("rcDetails");
+      const hostname = document.getElementById("rcHostnameInput")?.value;
+      badge.innerText = "UPDATING...";
+      try {
+        const res = await fetch("/api/antigravity/remote-control/toggle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled, hostname })
+        });
+        const data = await res.json();
+        if (data.enabled) {
+          badge.className = "mode-pill mode-cdp";
+          badge.innerText = "ACTIVE";
+          if (details) details.style.display = "block";
+          if (data.url) {
+            const urlText = document.getElementById("rcUrlText");
+            if (urlText) urlText.innerText = data.url;
+          }
+          showToast("Remote Control enabled! Local agents accessible from companion.");
+        } else {
+          badge.className = "mode-pill mode-win32";
+          badge.innerText = "DISABLED";
+          if (details) details.style.display = "none";
+          showToast("Remote Control disabled.");
+        }
+      } catch (err) {
+        showToast("Failed to toggle Remote Control");
+      }
+    }
+
+    async function onUpdateHostname(hostname) {
+      try {
+        await fetch("/api/antigravity/remote-control/toggle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: true, hostname })
+        });
+        showToast("Device name updated!");
+      } catch {}
+    }
+
+    function copyRcLink() {
+      const url = document.getElementById("rcUrlText")?.innerText || "";
+      if (url) {
+        navigator.clipboard.writeText(url).then(() => showToast("Companion Link copied!"));
       }
     }
 
