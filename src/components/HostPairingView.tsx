@@ -14,6 +14,9 @@ interface HostPairingViewProps {
   activeWorkspace?: string;
   onSwitchWorkspace?: (path: string) => void;
   onOpenOnboarding?: () => void;
+  onNavigateToTab?: (tab: any) => void;
+  onAntigravityConnected?: (info: AntigravityScanResult) => void;
+  activeCompanion?: AntigravityScanResult | null;
 }
 
 export const HostPairingView: React.FC<HostPairingViewProps> = ({
@@ -25,6 +28,9 @@ export const HostPairingView: React.FC<HostPairingViewProps> = ({
   activeWorkspace = "C:\\Users\\devra\\Downloads\\gravktrl",
   onSwitchWorkspace,
   onOpenOnboarding,
+  onNavigateToTab,
+  onAntigravityConnected,
+  activeCompanion,
 }) => {
   const [profiles, setProfiles] = useState<PcProfile[]>([]);
   const [activeProfile, setActiveProfile] = useState<PcProfile | null>(null);
@@ -53,8 +59,15 @@ export const HostPairingView: React.FC<HostPairingViewProps> = ({
     setIsCameraScannerOpen(false);
     if (result.type === "antigravity") {
       setScannedAntigravity(result);
-      setIsCompanionDeckOpen(true);
-      showToast("Antigravity Companion QR detected!");
+      if (onAntigravityConnected) {
+        onAntigravityConnected(result);
+      }
+      if (onNavigateToTab) {
+        onNavigateToTab("companion");
+      } else {
+        setIsCompanionDeckOpen(true);
+      }
+      showToast("Antigravity Companion Connected!");
     } else if (result.type === "gravktrl") {
       const profile: PcProfile = {
         id: "profile-" + Date.now(),
@@ -69,6 +82,9 @@ export const HostPairingView: React.FC<HostPairingViewProps> = ({
       client.saveProfile(profile);
       client.connect(profile);
       loadProfiles();
+      if (onNavigateToTab) {
+        onNavigateToTab("agent");
+      }
       showToast(`Connected to PC at ${result.host}:${result.port}`);
     } else {
       showToast(`Scanned: ${result.text.slice(0, 30)}...`);

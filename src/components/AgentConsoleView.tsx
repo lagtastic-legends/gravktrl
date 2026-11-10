@@ -43,6 +43,7 @@ interface AgentConsoleViewProps {
   client: GravKtrlClient;
   activeWorkspace: string;
   onNavigateToScreen?: () => void;
+  onNavigateToCompanion?: () => void;
 }
 
 interface FileActivity {
@@ -105,7 +106,12 @@ const CircularGauge: React.FC<{
   );
 };
 
-export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, activeWorkspace, onNavigateToScreen }) => {
+export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({
+  client,
+  activeWorkspace,
+  onNavigateToScreen,
+  onNavigateToCompanion,
+}) => {
   const [prompt, setPrompt] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [agentStatus, setAgentStatus] = useState<string>("idle");
@@ -211,7 +217,11 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
     setIsCameraScannerOpen(false);
     if (result.type === "antigravity") {
       setScannedAntigravity(result);
-      setIsCompanionDeckOpen(true);
+      if (onNavigateToCompanion) {
+        onNavigateToCompanion();
+      } else {
+        setIsCompanionDeckOpen(true);
+      }
     } else if (result.type === "gravktrl") {
       const profile = {
         id: "profile-" + Date.now(),
@@ -733,17 +743,19 @@ export const AgentConsoleView: React.FC<AgentConsoleViewProps> = ({ client, acti
             )}
 
             {/* Native Antigravity Remote Control Companion Link */}
-            {rcInfo?.enabled && rcInfo.url && (
-              <a
-                href={rcInfo.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Open Antigravity Cloud Companion"
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 text-[9px] font-bold hover:bg-purple-100 transition"
+            {rcInfo?.enabled && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (onNavigateToCompanion) onNavigateToCompanion();
+                  else if (rcInfo.url) window.open(rcInfo.url, "_blank");
+                }}
+                title="Switch to Antigravity Cloud Companion Deck"
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 text-[9px] font-bold hover:bg-purple-100 transition active:scale-95"
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
                 <span>COMPANION</span>
-              </a>
+              </button>
             )}
           </div>
 

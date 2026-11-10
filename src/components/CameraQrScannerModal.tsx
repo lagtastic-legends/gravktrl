@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Laptop,
   Sparkles,
+  Zap,
 } from "lucide-react";
 import jsQR from "jsqr";
 
@@ -68,6 +69,7 @@ export const CameraQrScannerModal: React.FC<CameraQrScannerModalProps> = ({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastDetected, setLastDetected] = useState<ScanResult | null>(null);
+  const [autoConnect, setAutoConnect] = useState(true);
 
   const animationFrameId = useRef<number | null>(null);
   const barcodeDetectorRef = useRef<any>(null);
@@ -176,12 +178,18 @@ export const CameraQrScannerModal: React.FC<CameraQrScannerModalProps> = ({
       const parsed = parseDecodedText(rawText);
       setLastDetected(parsed);
 
-      // Give visual feedback before triggering callback
-      setTimeout(() => {
-        onScanSuccess(parsed);
-      }, 400);
+      // Instant Auto-Connect: immediately hand over to caller to connect with zero clicks
+      if (autoConnect) {
+        setTimeout(() => {
+          onScanSuccess(parsed);
+        }, 80);
+      } else {
+        setTimeout(() => {
+          onScanSuccess(parsed);
+        }, 500);
+      }
     },
-    [isProcessing, triggerSuccessFeedback, parseDecodedText, onScanSuccess]
+    [isProcessing, triggerSuccessFeedback, parseDecodedText, onScanSuccess, autoConnect]
   );
 
   // Start Camera Stream
@@ -489,6 +497,25 @@ export const CameraQrScannerModal: React.FC<CameraQrScannerModalProps> = ({
 
         {/* Bottom Control Bar */}
         <div className="p-4 bg-[#131720] border-t border-white/10 space-y-3">
+          {/* Instant Auto-Connect Toggle Strip */}
+          <div className="flex items-center justify-between px-2 py-1.5 rounded-xl bg-white/5 border border-white/5 text-[11px]">
+            <div className="flex items-center gap-1.5 text-slate-300">
+              <Zap className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="font-bold">Instant Auto-Connect</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAutoConnect(!autoConnect)}
+              className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase transition-all ${
+                autoConnect
+                  ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/20"
+                  : "bg-white/5 text-slate-400 border border-white/10"
+              }`}
+            >
+              {autoConnect ? "ON (Instant Link)" : "OFF (Manual)"}
+            </button>
+          </div>
+
           <div className="flex items-center justify-around gap-2">
             {/* Torch Toggle */}
             <button

@@ -19,8 +19,10 @@ import { TerminalDeckView } from "@/components/TerminalDeckView";
 import { GitWorkspaceView } from "@/components/GitWorkspaceView";
 import { HostPairingView } from "@/components/HostPairingView";
 import { ScreenMirrorView } from "@/components/ScreenMirrorView";
+import { CompanionDeckView } from "@/components/CompanionDeckView";
+import { CameraQrScannerModal, type AntigravityScanResult, type ScanResult } from "@/components/CameraQrScannerModal";
 
-type ActiveTab = "agent" | "terminal" | "git" | "host" | "screen";
+type ActiveTab = "agent" | "companion" | "terminal" | "git" | "host" | "screen";
 
 export default function GravKtrlApp() {
   const [client] = useState(() => getGravKtrlClient());
@@ -32,7 +34,12 @@ export default function GravKtrlApp() {
   const [activeWorkspace, setActiveWorkspace] = useState<string>("C:\\Users\\devra\\Downloads\\gravktrl");
   const [telemetry, setTelemetry] = useState<TelemetryData | null>(null);
 
-  // Onboarding wizard popup state
+  // Active Antigravity Companion & Multi-Rig History
+  const [activeCompanion, setActiveCompanion] = useState<AntigravityScanResult | null>(null);
+  const [companionHistory, setCompanionHistory] = useState<AntigravityScanResult[]>([]);
+
+  // Scanner & Modal States
+  const [isGlobalScannerOpen, setIsGlobalScannerOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showPostureMenu, setShowPostureMenu] = useState(false);
 
@@ -54,8 +61,21 @@ export default function GravKtrlApp() {
       setLatencyMs(lat);
     });
 
-    // Check first-time user for auto onboarding
+    // Check first-time user and load persistent companion session
     if (typeof window !== "undefined") {
+      const savedCompanion = localStorage.getItem("gravktrl_active_companion");
+      if (savedCompanion) {
+        try {
+          setActiveCompanion(JSON.parse(savedCompanion));
+        } catch {}
+      }
+      const savedHistory = localStorage.getItem("gravktrl_companion_history");
+      if (savedHistory) {
+        try {
+          setCompanionHistory(JSON.parse(savedHistory));
+        } catch {}
+      }
+
       const pairedBefore = localStorage.getItem("gravktrl_paired_hosts");
       if (!pairedBefore) {
         setShowOnboarding(true);
@@ -153,6 +173,53 @@ export default function GravKtrlApp() {
     return parts[parts.length - 1] || parts[parts.length - 2] || "workspace";
   };
 
+  // AUTOMATIC CONNECT: Antigravity Remote Companion
+  const handleAntigravityConnected = (result: AntigravityScanResult) => {
+    setActiveCompanion(result);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("gravktrl_active_companion", JSON.stringify(result));
+      setCompanionHistory((prev) => {
+        const filtered = prev.filter((p) => p.instanceId !== result.instanceId);
+        const updated = [result, ...filtered].slice(0, 10);
+        localStorage.setItem("gravktrl_companion_history", JSON.stringify(updated));
+        return updated;
+      });
+    }
+    // Instant auto-navigation directly to the Companion deck
+    setActiveTab("companion");
+    setIsGlobalScannerOpen(false);
+    setShowOnboarding(false);
+  };
+
+  // AUTOMATIC CONNECT: GravKtrl Host PC
+  const handleHostPairingSuccess = (profile: any) => {
+    client.saveProfile(profile);
+    client.connect(profile);
+    // Instant auto-navigation directly to Agent console
+    setActiveTab("agent");
+    setIsGlobalScannerOpen(false);
+    setShowOnboarding(false);
+  };
+
+  const handleGlobalScanSuccess = (result: ScanResult) => {
+    setIsGlobalScannerOpen(false);
+    if (result.type === "antigravity") {
+      handleAntigravityConnected(result);
+    } else if (result.type === "gravktrl") {
+      const profile = {
+        id: "profile-scan-" + Date.now(),
+        name: "PC Host (Scanned QR)",
+        host: result.host,
+        port: result.port,
+        token: result.token,
+        pin: result.pin,
+        isTailscale: result.host.startsWith("100."),
+        lastConnected: new Date().toISOString(),
+      };
+      handleHostPairingSuccess(profile);
+    }
+  };
+
   const handleFlipExecuteMacro = (cmd: string) => {
     client.executeTerminal(cmd);
   };
@@ -176,6 +243,10 @@ export default function GravKtrlApp() {
   const activeTabTitle =
     activeTab === "agent"
       ? "Agent Console"
+      : activeTab === "companion"
+      ? "Antigravity Companion"
+      : activeTab === "screen"
+      ? "Screen Mirror"
       : activeTab === "terminal"
       ? "Terminal Engine"
       : activeTab === "git"
@@ -342,6 +413,21 @@ export default function GravKtrlApp() {
                 client={client}
                 activeWorkspace={activeWorkspace}
                 onNavigateToScreen={() => setActiveTab("screen")}
+                onNavigateToCompanion={() => setActiveTab("companion")}
+              />
+            )}
+            {activeTab === "companion" && (
+              <CompanionDeckView
+                companion={activeCompanion}
+                onScanNewCompanion={() => setIsGlobalScannerOpen(true)}
+                onDisconnectCompanion={() => {
+                  setActiveCompanion(null);
+                  if (typeof window !== "undefined") {
+                    localStorage.removeItem("gravktrl_active_companion");
+                  }
+                }}
+                companionHistory={companionHistory}
+                onSelectCompanion={(item) => handleAntigravityConnected(item)}
               />
             )}
             {activeTab === "terminal" && (
@@ -366,6 +452,9 @@ export default function GravKtrlApp() {
                 onRefreshTelemetry={fetchTelemetryAndWorkspace}
                 activeWorkspace={activeWorkspace}
                 onOpenOnboarding={() => setShowOnboarding(true)}
+                onNavigateToTab={(tab) => setActiveTab(tab)}
+                onAntigravityConnected={handleAntigravityConnected}
+                activeCompanion={activeCompanion}
               />
             )}
             {activeTab === "screen" && (
@@ -382,11 +471,26 @@ export default function GravKtrlApp() {
               {activeTab === "screen" && (
                 <ScreenMirrorView client={client} activeWorkspace={activeWorkspace} />
               )}
+              {activeTab === "companion" && (
+                <CompanionDeckView
+                  companion={activeCompanion}
+                  onScanNewCompanion={() => setIsGlobalScannerOpen(true)}
+                  onDisconnectCompanion={() => {
+                    setActiveCompanion(null);
+                    if (typeof window !== "undefined") {
+                      localStorage.removeItem("gravktrl_active_companion");
+                    }
+                  }}
+                  companionHistory={companionHistory}
+                  onSelectCompanion={(item) => handleAntigravityConnected(item)}
+                />
+              )}
               {activeTab === "agent" && (
                 <AgentConsoleView
                 client={client}
                 activeWorkspace={activeWorkspace}
                 onNavigateToScreen={() => setActiveTab("screen")}
+                onNavigateToCompanion={() => setActiveTab("companion")}
               />
               )}
               {activeTab === "host" && (
@@ -398,6 +502,9 @@ export default function GravKtrlApp() {
                   onRefreshTelemetry={fetchTelemetryAndWorkspace}
                   activeWorkspace={activeWorkspace}
                   onOpenOnboarding={() => setShowOnboarding(true)}
+                  onNavigateToTab={(tab) => setActiveTab(tab)}
+                  onAntigravityConnected={handleAntigravityConnected}
+                  activeCompanion={activeCompanion}
                 />
               )}
               {activeTab !== "agent" && activeTab !== "host" && activeTab !== "screen" && (
@@ -585,10 +692,30 @@ export default function GravKtrlApp() {
             <span className="text-[10px] tracking-tight">Agent</span>
           </button>
 
+          {/* Companion Tab */}
+          <button
+            onClick={() => setActiveTab("companion")}
+            className={`flex flex-col items-center justify-center gap-0.5 min-w-[46px] min-h-[44px] h-full transition-all relative ${
+              activeTab === "companion" ? "text-cyan-600 font-bold" : "text-slate-400 hover:text-slate-600"
+            }`}
+          >
+            {activeTab === "companion" ? (
+              <div className="w-9 h-7 rounded-full bg-cyan-50 shadow-neo-soft flex items-center justify-center text-cyan-600">
+                <span className="material-symbols-outlined text-[18px]">public</span>
+              </div>
+            ) : (
+              <span className="material-symbols-outlined text-[19px]">public</span>
+            )}
+            <span className="text-[10px] tracking-tight">Companion</span>
+            {activeCompanion && (
+              <span className="absolute top-1.5 right-2 w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+            )}
+          </button>
+
           {/* Screen Mirror Tab */}
           <button
             onClick={() => setActiveTab("screen")}
-            className={`flex flex-col items-center justify-center gap-0.5 min-w-[50px] min-h-[44px] h-full transition-all ${
+            className={`flex flex-col items-center justify-center gap-0.5 min-w-[46px] min-h-[44px] h-full transition-all ${
               activeTab === "screen" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
             }`}
           >
@@ -605,7 +732,7 @@ export default function GravKtrlApp() {
           {/* Terminal Tab */}
           <button
             onClick={() => setActiveTab("terminal")}
-            className={`flex flex-col items-center justify-center gap-0.5 min-w-[50px] min-h-[44px] h-full transition-all ${
+            className={`flex flex-col items-center justify-center gap-0.5 min-w-[46px] min-h-[44px] h-full transition-all ${
               activeTab === "terminal" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
             }`}
           >
@@ -622,7 +749,7 @@ export default function GravKtrlApp() {
           {/* Git/Files Tab */}
           <button
             onClick={() => setActiveTab("git")}
-            className={`flex flex-col items-center justify-center gap-0.5 min-w-[50px] min-h-[44px] h-full transition-all ${
+            className={`flex flex-col items-center justify-center gap-0.5 min-w-[46px] min-h-[44px] h-full transition-all ${
               activeTab === "git" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
             }`}
           >
@@ -639,7 +766,7 @@ export default function GravKtrlApp() {
           {/* Host PC Tab */}
           <button
             onClick={() => setActiveTab("host")}
-            className={`flex flex-col items-center justify-center gap-0.5 min-w-[50px] min-h-[44px] h-full transition-all ${
+            className={`flex flex-col items-center justify-center gap-0.5 min-w-[46px] min-h-[44px] h-full transition-all ${
               activeTab === "host" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
             }`}
           >
@@ -662,10 +789,20 @@ export default function GravKtrlApp() {
           onClose={() => setShowOnboarding(false)}
           onConnected={() => {
             setShowOnboarding(false);
+            setActiveTab("agent");
             fetchTelemetryAndWorkspace();
           }}
+          onNavigateToTab={(tab) => setActiveTab(tab)}
+          onAntigravityConnected={handleAntigravityConnected}
         />
       )}
+
+      {/* 5. GLOBAL CAMERA QR SCANNER */}
+      <CameraQrScannerModal
+        isOpen={isGlobalScannerOpen}
+        onClose={() => setIsGlobalScannerOpen(false)}
+        onScanSuccess={handleGlobalScanSuccess}
+      />
     </div>
   );
 }

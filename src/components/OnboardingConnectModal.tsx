@@ -30,6 +30,8 @@ interface OnboardingConnectModalProps {
   connectionState?: ConnectionState;
   latencyMs?: number | null;
   onConnected?: () => void;
+  onNavigateToTab?: (tab: any) => void;
+  onAntigravityConnected?: (info: AntigravityScanResult) => void;
 }
 
 type ModalTab = "start" | "pair" | "diagnostic";
@@ -41,6 +43,8 @@ export const OnboardingConnectModal: React.FC<OnboardingConnectModalProps> = ({
   connectionState = "disconnected",
   latencyMs = null,
   onConnected,
+  onNavigateToTab,
+  onAntigravityConnected,
 }) => {
   const [activeTab, setActiveTab] = useState<ModalTab>("pair");
   const [copiedCmd, setCopiedCmd] = useState(false);
@@ -69,7 +73,13 @@ export const OnboardingConnectModal: React.FC<OnboardingConnectModalProps> = ({
     setIsCameraScannerOpen(false);
     if (result.type === "antigravity") {
       setScannedAntigravity(result);
-      setIsCompanionDeckOpen(true);
+      if (onAntigravityConnected) {
+        onAntigravityConnected(result);
+      }
+      if (onNavigateToTab) {
+        onNavigateToTab("companion");
+      }
+      onClose();
     } else if (result.type === "gravktrl") {
       const profile = {
         id: "profile-" + Date.now(),
@@ -84,7 +94,8 @@ export const OnboardingConnectModal: React.FC<OnboardingConnectModalProps> = ({
       client.saveProfile(profile);
       client.connect(profile);
       if (onConnected) onConnected();
-      else onClose();
+      if (onNavigateToTab) onNavigateToTab("agent");
+      onClose();
     } else {
       alert("Scanned: " + result.text);
     }

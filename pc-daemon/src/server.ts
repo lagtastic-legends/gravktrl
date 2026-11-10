@@ -403,7 +403,7 @@ export class GravKtrlServer {
         activeWorkspace: activeWs,
         workspaces,
         cdpActive: cdpHealth.healthy,
-        version: "1.6.0",
+        version: "1.6.1",
         remoteControl: rcStatus,
       });
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
