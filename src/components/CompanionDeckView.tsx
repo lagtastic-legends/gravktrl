@@ -20,6 +20,7 @@ import {
   Clipboard,
   ArrowRight,
   RefreshCw,
+  AlertCircle,
 } from "lucide-react";
 import type { AntigravityScanResult } from "./CameraQrScannerModal";
 import { parseDecodedScanText } from "./CameraQrScannerModal";
@@ -33,6 +34,10 @@ interface CompanionDeckViewProps {
   onSelectCompanion?: (companion: AntigravityScanResult) => void;
   client?: GravKtrlClient;
   onNavigateToTab?: (tab: "agent" | "companion" | "terminal" | "git" | "host" | "screen") => void;
+  connectionState?: "disconnected" | "connecting" | "connected" | "authenticated" | "error";
+  onRetryConnectPc?: () => void;
+  isPairingPc?: boolean;
+  pairingError?: string | null;
 }
 
 export const CompanionDeckView: React.FC<CompanionDeckViewProps> = ({
@@ -43,6 +48,10 @@ export const CompanionDeckView: React.FC<CompanionDeckViewProps> = ({
   onSelectCompanion,
   client,
   onNavigateToTab,
+  connectionState,
+  onRetryConnectPc,
+  isPairingPc,
+  pairingError,
 }) => {
   const [copied, setCopied] = useState(false);
   const [copiedId, setCopiedId] = useState(false);
@@ -50,6 +59,32 @@ export const CompanionDeckView: React.FC<CompanionDeckViewProps> = ({
   const [autoOpenEnabled, setAutoOpenEnabled] = useState(true);
   const [isOpeningBrowser, setIsOpeningBrowser] = useState(false);
   const [detectedHostRig, setDetectedHostRig] = useState<AntigravityScanResult | null>(null);
+  const [internalIsPairing, setInternalIsPairing] = useState(false);
+  const [internalPairingError, setInternalPairingError] = useState<string | null>(null);
+
+  const effectiveIsPairing = isPairingPc !== undefined ? isPairingPc : internalIsPairing;
+  const effectivePairingError = pairingError !== undefined ? pairingError : internalPairingError;
+  const isPcConnected = connectionState === "authenticated" || client?.getConnectionState() === "authenticated";
+
+  const handleTriggerConnectPc = async () => {
+    if (onRetryConnectPc) {
+      onRetryConnectPc();
+      return;
+    }
+    if (!client || !companion) return;
+    setInternalIsPairing(true);
+    setInternalPairingError(null);
+    try {
+      const profile = await client.pairWithAntigravityInstance(companion.instanceId);
+      if (!profile) {
+        setInternalPairingError("PC Daemon not detected on port 8787. Make sure GravKtrl-Windows.bat is running on your PC.");
+      }
+    } catch (err: any) {
+      setInternalPairingError(err?.message || "Failed to pair with PC host.");
+    } finally {
+      setInternalIsPairing(false);
+    }
+  };
 
   // Load auto-open preference
   useEffect(() => {
@@ -355,6 +390,107 @@ export const CompanionDeckView: React.FC<CompanionDeckViewProps> = ({
 
       {/* Main Command Room Body */}
       <div className="p-4 space-y-4 max-w-lg mx-auto w-full pb-16">
+        {/* DUAL-MODE BRIDGE: LOCAL PC DAEMON STATUS & AUTO-CONNECT */}
+        {isPcConnected ? (
+          <div className="w-full p-4 rounded-2xl bg-[#0d1527] border border-cyan-500/40 text-left space-y-2.5 shadow-lg shadow-cyan-950/40">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                </span>
+                <span className="text-xs font-black uppercase tracking-wider text-slate-100 flex items-center gap-1.5">
+                  <Laptop className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>PC Host Bridge Connected</span>
+                </span>
+              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
+                PORT 8787 ONLINE
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between text-[11px] text-slate-300 font-mono">
+              <span className="text-slate-400">Endpoint</span>
+              <span className="text-cyan-300 truncate max-w-[220px]">
+                {client?.getCurrentProfile()?.host || "192.168.1.5"}:8787
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 pt-1">
+              <button
+                onClick={() => onNavigateToTab?.("terminal")}
+                className="py-2 px-2 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-200 text-[10px] font-bold flex items-center justify-center gap-1 transition-all active:scale-95"
+              >
+                <Terminal className="w-3 h-3 text-purple-400" />
+                <span>Terminal</span>
+              </button>
+              <button
+                onClick={() => onNavigateToTab?.("screen")}
+                className="py-2 px-2 rounded-xl bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/40 text-cyan-200 text-[10px] font-bold flex items-center justify-center gap-1 transition-all active:scale-95"
+              >
+                <Monitor className="w-3 h-3 text-cyan-400" />
+                <span>Mirror</span>
+              </button>
+              <button
+                onClick={() => onNavigateToTab?.("agent")}
+                className="py-2 px-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-200 text-[10px] font-bold flex items-center justify-center gap-1 transition-all active:scale-95"
+              >
+                <MessageSquare className="w-3 h-3 text-indigo-400" />
+                <span>Agent</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="w-full p-4 rounded-2xl bg-[#181308] border border-amber-500/40 text-left space-y-2.5 shadow-lg shadow-amber-950/20">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+                <span className="text-xs font-black uppercase tracking-wider text-amber-200 flex items-center gap-1.5">
+                  <Laptop className="w-3.5 h-3.5 text-amber-400" />
+                  <span>PC Host Disconnected</span>
+                </span>
+              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
+                OFFLINE
+              </span>
+            </div>
+
+            <p className="text-[11px] text-amber-200/80 leading-relaxed">
+              Link your phone to the PC daemon on port 8787 to enable Terminal REPL, Screen Mirror, and Agent Console.
+            </p>
+
+            {effectivePairingError && (
+              <div className="p-2.5 rounded-xl bg-rose-950/60 border border-rose-500/40 text-[11px] text-rose-200 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="font-semibold text-rose-100">{effectivePairingError}</div>
+                  <div className="text-[10px] text-rose-300">
+                    Tip: Run <code className="bg-rose-900/50 px-1 py-0.5 rounded text-white font-mono">GravKtrl-Windows.bat</code> on your PC.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={handleTriggerConnectPc}
+              disabled={effectiveIsPairing}
+              className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 disabled:opacity-50 text-slate-950 font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-md shadow-amber-500/20 active:scale-95 transition-all"
+            >
+              {effectiveIsPairing ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Sweeping LAN for PC (Port 8787)...</span>
+                </>
+              ) : (
+                <>
+                  <Zap className="w-3.5 h-3.5" />
+                  <span>Auto-Connect to PC (Radar Sweep)</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
         {/* Hero Chrome Custom Tabs Launcher Card */}
         <div className="relative p-5 rounded-3xl bg-gradient-to-br from-[#131929] via-[#0d121c] to-[#0a0d14] border border-cyan-500/30 shadow-2xl overflow-hidden text-center space-y-4">
           <div className="absolute -top-12 -right-12 w-36 h-36 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none" />

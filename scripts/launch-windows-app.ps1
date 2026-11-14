@@ -60,13 +60,13 @@ if (-not $isOnline) {
     Write-Host "[OK] [1/3] GravKtrl PC Daemon is already active!" -ForegroundColor Green
 }
 
-# 2. Ensure Desktop Shortcut exists
+# 2. Ensure Desktop & Startup Shortcuts exist
 try {
     $wsh = New-Object -ComObject WScript.Shell
     $shortcutPath = Join-Path $desktop "GravKtrl Windows Control.lnk"
+    $batPath = Join-Path $repoRoot "GravKtrl-Windows.bat"
     if (-not (Test-Path $shortcutPath)) {
         $lnk = $wsh.CreateShortcut($shortcutPath)
-        $batPath = Join-Path $repoRoot "GravKtrl-Windows.bat"
         $lnk.TargetPath = $batPath
         $lnk.WorkingDirectory = $repoRoot
         $lnk.Description = "Launch GravKtrl Windows Desktop App & Control Center"
@@ -77,6 +77,22 @@ try {
         Write-Host "[OK] [2/3] Created Desktop shortcut: 'GravKtrl Windows Control'" -ForegroundColor Green
     } else {
         Write-Host "[OK] [2/3] Desktop shortcut already present." -ForegroundColor Green
+    }
+
+    # Auto-start on Windows boot
+    $startupFolder = [System.Environment]::GetFolderPath('Startup')
+    $startupLnkPath = Join-Path $startupFolder "GravKtrl Daemon.lnk"
+    if (-not (Test-Path $startupLnkPath)) {
+        $startLnk = $wsh.CreateShortcut($startupLnkPath)
+        $startLnk.TargetPath = $batPath
+        $startLnk.WorkingDirectory = $repoRoot
+        $startLnk.Description = "GravKtrl PC Background Daemon Auto-Start"
+        if (Test-Path $icoPath) {
+            $startLnk.IconLocation = "$icoPath,0"
+        }
+        $startLnk.WindowStyle = 7 # Minimized
+        $startLnk.Save()
+        Write-Host "[OK] [2/3] Created Windows Startup Auto-Start shortcut" -ForegroundColor Green
     }
 } catch {
     Write-Host "[INFO] Shortcut check complete." -ForegroundColor DarkGray

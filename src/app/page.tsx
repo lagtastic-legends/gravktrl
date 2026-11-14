@@ -47,6 +47,8 @@ export default function GravKtrlApp() {
   const [isGlobalScannerOpen, setIsGlobalScannerOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showPostureMenu, setShowPostureMenu] = useState(false);
+  const [isPairingPc, setIsPairingPc] = useState(false);
+  const [pcPairingError, setPcPairingError] = useState<string | null>(null);
 
   // Flip Flex tactile pad prompt state
   const [flipPrompt, setFlipPrompt] = useState("");
@@ -195,7 +197,30 @@ export default function GravKtrlApp() {
     return parts[parts.length - 1] || parts[parts.length - 2] || "workspace";
   };
 
-  // AUTOMATIC CONNECT: Antigravity Remote Companion
+  const handleConnectPcFromCompanion = async (instanceId?: string) => {
+    const targetId = instanceId || activeCompanion?.instanceId;
+    if (!targetId) return;
+
+    setIsPairingPc(true);
+    setPcPairingError(null);
+    try {
+      const profile = await client.pairWithAntigravityInstance(targetId, (msg) => {
+        console.log("[GravKtrl] Auto-pairing progress:", msg);
+      });
+      if (profile) {
+        console.log("[GravKtrl] Successfully paired PC host:", profile.name, profile.host);
+        setPcPairingError(null);
+      } else {
+        setPcPairingError("PC Daemon not detected on port 8787. Make sure GravKtrl-Windows.bat is running on your PC.");
+      }
+    } catch (err: any) {
+      setPcPairingError(err?.message || "Failed to pair with PC host.");
+    } finally {
+      setIsPairingPc(false);
+    }
+  };
+
+  // AUTOMATIC CONNECT: Antigravity Remote Companion & Local PC Daemon
   const handleAntigravityConnected = (result: AntigravityScanResult) => {
     setActiveCompanion(result);
     if (typeof window !== "undefined") {
@@ -211,6 +236,9 @@ export default function GravKtrlApp() {
     setActiveTab("companion");
     setIsGlobalScannerOpen(false);
     setShowOnboarding(false);
+
+    // DUAL AUTO-PAIRING: Simultaneously connect GravKtrl to the local PC host
+    handleConnectPcFromCompanion(result.instanceId);
 
     // INSTANT LAUNCH: Native Chrome Custom Tabs for zero X-Frame blocks & full Google auth
     const targetUrl = result.accountChooserUrl || result.companionUrl;
@@ -488,6 +516,10 @@ export default function GravKtrlApp() {
                 onSelectCompanion={(item) => handleAntigravityConnected(item)}
                 client={client}
                 onNavigateToTab={(tab) => setActiveTab(tab)}
+                connectionState={connectionState}
+                onRetryConnectPc={() => handleConnectPcFromCompanion(activeCompanion?.instanceId)}
+                isPairingPc={isPairingPc}
+                pairingError={pcPairingError}
               />
             )}
             {activeTab === "terminal" && (
@@ -545,6 +577,10 @@ export default function GravKtrlApp() {
                   onSelectCompanion={(item) => handleAntigravityConnected(item)}
                   client={client}
                   onNavigateToTab={(tab) => setActiveTab(tab)}
+                  connectionState={connectionState}
+                  onRetryConnectPc={() => handleConnectPcFromCompanion(activeCompanion?.instanceId)}
+                  isPairingPc={isPairingPc}
+                  pairingError={pcPairingError}
                 />
               )}
               {activeTab === "agent" && (

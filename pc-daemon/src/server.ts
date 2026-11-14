@@ -15,6 +15,7 @@ import { ScreenMirrorDriver, type ScreenInfo, type ScreenInputEvent } from "./dr
 import { InteractiveTerminalManager, type TerminalSessionInfo, type TerminalDataEvent } from "./drivers/interactive-terminal-manager.js";
 import { AntigravityHubDriver, type AntigravityRemoteControlStatus } from "./drivers/antigravity-hub-driver.js";
 import { renderDesktopHtml } from "./desktop-ui.js";
+import QRCode from "qrcode";
 
 export interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -319,8 +320,80 @@ export class GravKtrlServer {
     if (req.method === "GET" && (pathname === "/api/discover" || pathname === "/discover")) {
       const cdpHealth = await this.telemetry.checkCdpHealth();
       const beacon = this.auth.getDiscoveryBeacon(this.port, cdpHealth.healthy);
+      const rcStatus = await this.antigravityHub.getRemoteControlInfo().catch(() => null);
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(beacon));
+      res.end(
+        JSON.stringify({
+          ...beacon,
+          antigravity: rcStatus?.enabled
+            ? {
+                enabled: true,
+                instanceId: rcStatus.instanceId,
+                companionOrigin: rcStatus.companionOrigin,
+                url: rcStatus.url,
+                accountChooserUrl: rcStatus.accountChooserUrl,
+              }
+            : { enabled: false },
+        })
+      );
+      return;
+    }
+
+    // Direct Pairing via Antigravity Instance ID (scanned Antigravity QR code): POST /api/pair-antigravity
+    if (req.method === "POST" && pathname === "/api/pair-antigravity") {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", async () => {
+        try {
+          const payload = JSON.parse(body || "{}") as { instanceId?: string };
+          if (!payload.instanceId) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ success: false, error: "Missing required parameter: instanceId" }));
+            return;
+          }
+
+          const rcStatus = await this.antigravityHub.getRemoteControlInfo().catch(() => null);
+          const reqId = payload.instanceId.trim().toLowerCase().replace(/-v\d+$/, "");
+          const localId = (rcStatus?.instanceId || "").trim().toLowerCase().replace(/-v\d+$/, "");
+
+          if (!localId || reqId !== localId) {
+            res.writeHead(403, { "Content-Type": "application/json" });
+            res.end(
+              JSON.stringify({
+                success: false,
+                error: `Instance ID mismatch. Active PC instance is ${localId || "unavailable"}`,
+              })
+            );
+            return;
+          }
+
+          // Instance ID match verified! Screen physical access proven.
+          const beacon = this.auth.getDiscoveryBeacon(this.port);
+          const masterToken = this.auth.getMasterToken();
+          const activeWs = this.workspaceManager.getActiveWorkspace();
+          const workspaces = this.workspaceManager.listWorkspaces();
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              success: true,
+              masterToken,
+              pin: this.auth.getPin(),
+              lanIp: beacon.lanIp,
+              tailscaleIp: beacon.tailscaleIp,
+              hostname: beacon.name,
+              port: this.port,
+              activeWorkspace: activeWs,
+              workspaces,
+              antigravity: rcStatus,
+            })
+          );
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: false, error: errMsg }));
+        }
+      });
       return;
     }
 
@@ -393,6 +466,20 @@ export class GravKtrlServer {
       const workspaces = this.workspaceManager.listWorkspaces();
       const cdpHealth = await this.telemetry.checkCdpHealth();
       const rcStatus = await this.antigravityHub.getRemoteControlInfo();
+
+      const pairDeepLink = `gravktrl://pair?host=${beacon.lanIp}&port=${this.port}&token=${masterToken}&pin=${pin}`;
+      let qrCodeSvg = "";
+      try {
+        qrCodeSvg = await QRCode.toString(pairDeepLink, {
+          type: "svg",
+          margin: 1,
+          color: {
+            dark: "#38bdf8",
+            light: "#00000000",
+          },
+        });
+      } catch {}
+
       const html = renderDesktopHtml({
         hostname: beacon.name,
         port: this.port,
@@ -403,8 +490,9 @@ export class GravKtrlServer {
         activeWorkspace: activeWs,
         workspaces,
         cdpActive: cdpHealth.healthy,
-        version: "1.6.2",
+        version: "1.6.3",
         remoteControl: rcStatus,
+        qrCodeSvg,
       });
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(html);

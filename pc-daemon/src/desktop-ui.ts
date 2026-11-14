@@ -9,6 +9,7 @@ export interface DesktopUiParams {
   workspaces: Array<{ path: string; name: string }>;
   cdpActive: boolean;
   version: string;
+  qrCodeSvg?: string;
   remoteControl?: {
     available: boolean;
     enabled: boolean;
@@ -429,15 +430,27 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
   </header>
 
   <main>
-    <!-- 6-DIGIT QUICK PAIRING PIN -->
+    <!-- INSTANT SMARTPHONE PAIRING & QR CODE -->
     <div class="card">
       <div class="card-title">
         <span>Instant Smartphone Pairing</span>
         <span style="font-size: 10px; color: var(--accent-cyan); font-weight: 500;">Zero Typing Radar</span>
       </div>
-      <div class="pin-box" id="pinBox" title="Click to copy pairing credentials">
-        <div class="pin-code">${pinDisplay}</div>
-        <div class="pin-hint">Enter this 6-digit PIN on your phone or tap to copy</div>
+      <div style="display: flex; gap: 12px; align-items: center;">
+        ${params.qrCodeSvg ? `
+        <div style="background: #000; border: 1px solid rgba(6, 182, 212, 0.4); border-radius: 10px; padding: 6px; width: 110px; height: 110px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;" title="Scan with GravKtrl phone camera">
+          <div style="width: 96px; height: 96px; display: flex; align-items: center; justify-content: center;">
+            ${params.qrCodeSvg}
+          </div>
+        </div>
+        ` : ""}
+        <div class="pin-box" id="pinBox" style="flex: 1; padding: 12px;" title="Click to copy pairing credentials">
+          <div class="pin-code" style="font-size: 24px;">${pinDisplay}</div>
+          <div class="pin-hint">6-Digit Quick PIN or Scan QR with Phone Camera</div>
+        </div>
+      </div>
+      <div style="margin-top: 8px; font-size: 10px; color: #94a3b8; line-height: 1.4;">
+        💡 <strong>Antigravity Screen Scan:</strong> You can also scan Antigravity's on-screen QR code (Settings &gt; Remote Control) to auto-pair!
       </div>
     </div>
 

@@ -772,6 +772,117 @@ export class GravKtrlClient {
     return this.on("antigravity.remoteControlChanged", callback);
   }
 
+  /**
+   * Automatically discovers and pairs with the PC hosting the scanned Antigravity instance ID.
+   * Performs high-speed parallel LAN radar probing on port 8787.
+   */
+  public async pairWithAntigravityInstance(
+    instanceId: string,
+    onProgress?: (msg: string) => void
+  ): Promise<PcProfile | null> {
+    const candidates = new Set<string>();
+
+    // Current & saved profile hosts
+    const activeProf = this.getCurrentProfile();
+    if (activeProf?.host) candidates.add(activeProf.host);
+    for (const p of this.getSavedProfiles()) {
+      if (p.host) candidates.add(p.host);
+    }
+
+    if (typeof window !== "undefined" && window.location.hostname) {
+      candidates.add(window.location.hostname);
+    }
+    candidates.add("127.0.0.1");
+    candidates.add("localhost");
+
+    // Common local subnets: 192.168.1.x, 192.168.0.x, 192.168.43.x (hotspot), 172.20.10.x (iOS), 10.0.0.x
+    const subnets = ["192.168.1.", "192.168.0.", "192.168.43.", "172.20.10.", "10.0.0.", "192.168.2."];
+    const prioritySuffixes = [
+      "5", "2", "3", "4", "1", "6", "7", "8", "9", "10",
+      "100", "101", "102", "103", "104", "105", "110", "120", "150", "200"
+    ];
+
+    for (const sub of subnets) {
+      for (const sfx of prioritySuffixes) {
+        candidates.add(sub + sfx);
+      }
+    }
+
+    const candidateList = Array.from(candidates);
+    onProgress?.(`Probing ${candidateList.length} LAN endpoints for Antigravity instance...`);
+
+    const tryPairHost = async (host: string): Promise<PcProfile | null> => {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 1200);
+
+        const res = await fetch(`http://${host}:8787/api/pair-antigravity`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ instanceId }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (data?.success && data?.masterToken) {
+          const targetHost = (host === "127.0.0.1" || host === "localhost") && data.lanIp ? data.lanIp : (data.lanIp || host);
+          const profile: PcProfile = {
+            id: "profile-antigravity-" + Date.now(),
+            name: `${data.hostname || "PC Host"} (Antigravity Linked)`,
+            host: targetHost,
+            lanIp: data.lanIp,
+            tailscaleIp: data.tailscaleIp,
+            port: data.port || 8787,
+            token: data.masterToken,
+            pin: data.pin,
+            isTailscale: targetHost.startsWith("100."),
+            lastConnected: new Date().toISOString(),
+          };
+          this.saveProfile(profile);
+          this.connect(profile);
+          return profile;
+        }
+      } catch {}
+      return null;
+    };
+
+    // 1. Parallel attempt across candidate list
+    try {
+      const match = await Promise.any(
+        candidateList.map((h) =>
+          tryPairHost(h).then((p) => {
+            if (p) return p;
+            throw new Error("No match");
+          })
+        )
+      );
+      if (match) return match;
+    } catch {}
+
+    // 2. Full sweep across 192.168.1.1..254 if not found in priority list
+    const fullSubnet: string[] = [];
+    for (let i = 1; i <= 254; i++) {
+      const ip = `192.168.1.${i}`;
+      if (!candidates.has(ip)) fullSubnet.push(ip);
+    }
+
+    try {
+      const match = await Promise.any(
+        fullSubnet.map((h) =>
+          tryPairHost(h).then((p) => {
+            if (p) return p;
+            throw new Error("No match");
+          })
+        )
+      );
+      if (match) return match;
+    } catch {}
+
+    return null;
+  }
+
   // --- Voice Input Helper (Web Speech API) ---
   public createVoiceRecognition(
     onResult: (text: string) => void,
