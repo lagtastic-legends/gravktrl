@@ -210,6 +210,8 @@ export default function GravKtrlApp() {
       if (profile) {
         console.log("[GravKtrl] Successfully paired PC host:", profile.name, profile.host);
         setPcPairingError(null);
+        // Switch directly to Agent Console upon successful PC link
+        setActiveTab("agent");
       } else {
         setPcPairingError("PC Daemon not detected on port 8787. Make sure GravKtrl-Windows.bat is running on your PC.");
       }
@@ -232,29 +234,33 @@ export default function GravKtrlApp() {
         return updated;
       });
     }
-    // Instant auto-navigation directly to the Companion deck
-    setActiveTab("companion");
     setIsGlobalScannerOpen(false);
     setShowOnboarding(false);
 
-    // DUAL AUTO-PAIRING: Simultaneously connect GravKtrl to the local PC host
+    // DUAL AUTO-PAIRING: Simultaneously connect GravKtrl directly to the local PC host
     handleConnectPcFromCompanion(result.instanceId);
 
-    // INSTANT LAUNCH: Native Chrome Custom Tabs for zero X-Frame blocks & full Google auth
-    const targetUrl = result.accountChooserUrl || result.companionUrl;
-    import("@capacitor/browser")
-      .then(({ Browser }) => {
-        Browser.open({
-          url: targetUrl,
-          presentationStyle: "popover",
-          toolbarColor: "#0f1117",
-        }).catch(() => {
+    // OPTIONAL LAUNCH: Only open external browser if user explicitly enabled auto-open in preferences
+    const shouldAutoOpen =
+      typeof window !== "undefined" &&
+      localStorage.getItem("gravktrl_companion_auto_open") === "true";
+
+    if (shouldAutoOpen) {
+      const targetUrl = result.accountChooserUrl || result.companionUrl;
+      import("@capacitor/browser")
+        .then(({ Browser }) => {
+          Browser.open({
+            url: targetUrl,
+            presentationStyle: "popover",
+            toolbarColor: "#0f1117",
+          }).catch(() => {
+            window.open(targetUrl, "_blank", "noopener,noreferrer");
+          });
+        })
+        .catch(() => {
           window.open(targetUrl, "_blank", "noopener,noreferrer");
         });
-      })
-      .catch(() => {
-        window.open(targetUrl, "_blank", "noopener,noreferrer");
-      });
+    }
   };
 
   // AUTOMATIC CONNECT: GravKtrl Host PC

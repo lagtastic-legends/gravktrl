@@ -490,7 +490,7 @@ export class GravKtrlServer {
         activeWorkspace: activeWs,
         workspaces,
         cdpActive: cdpHealth.healthy,
-        version: "1.6.3",
+        version: "1.6.4",
         remoteControl: rcStatus,
         qrCodeSvg,
       });
