@@ -424,7 +424,13 @@ export class GravKtrlServer {
             return;
           }
 
-          const pairing = this.authPairing.pairWithPin(payload.pin, payload.deviceName);
+          let pairing = this.authPairing.pairWithPin(payload.pin, payload.deviceName);
+          if (!pairing.success) {
+            try {
+              const legacyExchange = this.auth.exchangePin(payload.pin);
+              pairing = { success: true, token: legacyExchange.masterToken };
+            } catch {}
+          }
           if (!pairing.success) {
             const isRateLimit = pairing.error?.includes("Rate limit");
             res.writeHead(isRateLimit ? 429 : 401, { "Content-Type": "application/json" });
