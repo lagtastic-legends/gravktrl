@@ -16,6 +16,11 @@ import { InteractiveTerminalManager, type TerminalSessionInfo, type TerminalData
 import { AntigravityHubDriver, type AntigravityRemoteControlStatus } from "./drivers/antigravity-hub-driver.js";
 import { renderDesktopHtml } from "./desktop-ui.js";
 import QRCode from "qrcode";
+import { GravKtrlAuthPairing } from "./auth-pairing.js";
+import { GravKtrlDiscoveryBroadcaster } from "./discovery.js";
+import { validateCommandSafety } from "./command-guard.js";
+import * as child_process from "node:child_process";
+import * as os from "node:os";
 
 export interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -83,6 +88,9 @@ export class GravKtrlServer {
   private screenMirror: ScreenMirrorDriver;
   private interactiveTerminal: InteractiveTerminalManager;
   private antigravityHub: AntigravityHubDriver;
+  private authPairing: GravKtrlAuthPairing;
+  private discoveryBroadcaster: GravKtrlDiscoveryBroadcaster;
+  private antigravityRemoteUrl: string = "";
   private authenticatedSockets: Set<WebSocket> = new Set();
 
   private agentDriver?: AgentDriver;
@@ -92,6 +100,8 @@ export class GravKtrlServer {
   constructor(port: number = 8787, baseDir: string = process.cwd()) {
     this.port = port;
     this.auth = new GravKtrlAuth(baseDir);
+    this.authPairing = new GravKtrlAuthPairing(baseDir);
+    this.discoveryBroadcaster = new GravKtrlDiscoveryBroadcaster(this.port, 8788, "0.1.0");
     this.telemetry = new TelemetryCollector();
     this.workspaceManager = new WorkspaceManager(baseDir);
     this.workspaceWatcher = new WorkspaceWatcher(this.workspaceManager.getActiveWorkspace());
@@ -194,7 +204,7 @@ export class GravKtrlServer {
         (request.headers["x-gravktrl-token"] as string) ||
         (request.headers.authorization ? request.headers.authorization.replace(/^Bearer\s+/i, "") : "");
 
-      const isAuthed = this.auth.verifyToken(token);
+      const isAuthed = this.auth.verifyToken(token) || this.authPairing.validateToken(token);
 
       this.wss.handleUpgrade(request, socket, head, (ws) => {
         if (isAuthed) {
@@ -220,7 +230,7 @@ export class GravKtrlServer {
           // Special case: explicit auth.authenticate method
           if (payload.method === "auth.authenticate") {
             const token = (payload.params as { token?: string })?.token;
-            if (this.auth.verifyToken(token)) {
+            if (this.auth.verifyToken(token) || this.authPairing.validateToken(token)) {
               isAuthenticated = true;
               this.authenticatedSockets.add(ws);
               this.sendWsResponse(ws, {
@@ -325,6 +335,10 @@ export class GravKtrlServer {
       res.end(
         JSON.stringify({
           ...beacon,
+          service: "gravktrl-daemon",
+          hostname: os.hostname(),
+          pairingPinFormatted: this.authPairing.getFormattedPin(),
+          pin: this.authPairing.getPin(),
           antigravity: rcStatus?.enabled
             ? {
                 enabled: true,
@@ -397,20 +411,27 @@ export class GravKtrlServer {
       return;
     }
 
-    // 6-Digit Quick PIN Exchange: POST /api/pair-pin
-    if (req.method === "POST" && pathname === "/api/pair-pin") {
+    // 6-Digit PIN Pairing Handshake: POST /api/pair or POST /api/pair-pin
+    if (req.method === "POST" && (pathname === "/api/pair" || pathname === "/api/pair-pin")) {
       let body = "";
       req.on("data", (chunk) => (body += chunk));
       req.on("end", async () => {
         try {
-          const payload = JSON.parse(body || "{}") as { pin?: string };
+          const payload = JSON.parse(body || "{}") as { pin?: string; deviceName?: string };
           if (!payload.pin) {
             res.writeHead(400, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ success: false, error: "Missing required parameter: pin" }));
             return;
           }
 
-          const exchange = this.auth.exchangePin(payload.pin);
+          const pairing = this.authPairing.pairWithPin(payload.pin, payload.deviceName);
+          if (!pairing.success) {
+            const isRateLimit = pairing.error?.includes("Rate limit");
+            res.writeHead(isRateLimit ? 429 : 401, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ success: false, error: pairing.error || "Invalid PIN" }));
+            return;
+          }
+
           const beacon = this.auth.getDiscoveryBeacon(this.port);
           const activeWs = this.workspaceManager.getActiveWorkspace();
           const workspaces = this.workspaceManager.listWorkspaces();
@@ -419,10 +440,11 @@ export class GravKtrlServer {
           res.end(
             JSON.stringify({
               success: true,
-              masterToken: exchange.masterToken,
+              token: pairing.token,
+              masterToken: pairing.token,
               lanIp: beacon.lanIp,
               tailscaleIp: beacon.tailscaleIp,
-              hostname: beacon.name,
+              hostname: beacon.name || os.hostname(),
               port: this.port,
               activeWorkspace: activeWs,
               workspaces,
@@ -430,8 +452,7 @@ export class GravKtrlServer {
           );
         } catch (err: unknown) {
           const errMsg = err instanceof Error ? err.message : String(err);
-          const isRateLimit = errMsg.includes("Rate limit");
-          res.writeHead(isRateLimit ? 429 : 400, { "Content-Type": "application/json" });
+          res.writeHead(500, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ success: false, error: errMsg }));
         }
       });
@@ -457,11 +478,11 @@ export class GravKtrlServer {
       }
     }
 
-    // Windows Desktop Control Center: GET /desktop
-    if (req.method === "GET" && (pathname === "/desktop" || pathname === "/desktop/")) {
+    // Windows Desktop Control Center: GET / or GET /desktop
+    if (req.method === "GET" && (pathname === "/" || pathname === "/desktop" || pathname === "/desktop/")) {
       const beacon = this.auth.getDiscoveryBeacon(this.port);
-      const pin = this.auth.getPin();
-      const masterToken = this.auth.getMasterToken();
+      const pin = this.authPairing.getPin();
+      const masterToken = this.authPairing.getMasterToken();
       const activeWs = this.workspaceManager.getActiveWorkspace();
       const workspaces = this.workspaceManager.listWorkspaces();
       const cdpHealth = await this.telemetry.checkCdpHealth();
@@ -688,9 +709,58 @@ export class GravKtrlServer {
             id,
             result: {
               pong: true,
+              timestamp: Date.now(),
               time: new Date().toISOString(),
               server: "gravktrl-daemon",
               activeWorkspace: activeWs,
+            },
+          };
+        }
+
+        case "system.metrics": {
+          const totalMem = os.totalmem();
+          const freeMem = os.freemem();
+          const usedMem = totalMem - freeMem;
+          const loadAvg = os.loadavg();
+          const cpus = os.cpus();
+
+          let gpuInfo: { temperature?: number; memoryUsed?: number; memoryTotal?: number; name?: string } | null = null;
+          try {
+            const out = child_process.execSync(
+              "nvidia-smi --query-gpu=temperature.gpu,memory.used,memory.total,name --format=csv,noheader,nounits",
+              { encoding: "utf-8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] }
+            );
+            if (out && out.trim()) {
+              const parts = out.trim().split(",").map((s) => s.trim());
+              if (parts.length >= 3) {
+                gpuInfo = {
+                  temperature: parseInt(parts[0], 10) || undefined,
+                  memoryUsed: parseInt(parts[1], 10) || undefined,
+                  memoryTotal: parseInt(parts[2], 10) || undefined,
+                  name: parts[3] || undefined,
+                };
+              }
+            }
+          } catch {}
+
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              hostname: os.hostname(),
+              platform: os.platform(),
+              release: os.release(),
+              arch: os.arch(),
+              cpuCount: cpus.length,
+              cpuModel: cpus[0]?.model || "Unknown CPU",
+              loadAvg,
+              totalMemory: totalMem,
+              freeMemory: freeMem,
+              usedMemory: usedMem,
+              memoryUsedPercent: Math.round((usedMem / totalMem) * 100),
+              uptime: os.uptime(),
+              gpu: gpuInfo,
+              timestamp: Date.now(),
             },
           };
         }
@@ -858,6 +928,186 @@ export class GravKtrlServer {
         }
 
         // TERMINAL ENGINE & DEST GUARD
+        case "terminal.exec": {
+          const command = (params.command || "") as string;
+          if (!command) {
+            return {
+              jsonrpc: "2.0",
+              id,
+              error: { code: -32602, message: "Missing required parameter: command" },
+            };
+          }
+
+          const safety = validateCommandSafety(command);
+          if (!safety.allowed) {
+            return {
+              jsonrpc: "2.0",
+              id,
+              result: {
+                allowed: false,
+                riskLevel: safety.riskLevel,
+                reason: safety.reason,
+                status: "blocked",
+                output: `[SECURITY GUARD] Command blocked: ${safety.reason || "Destructive command pattern detected"}`,
+              },
+            };
+          }
+
+          const execId = `exec_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          const isWindows = process.platform === "win32";
+          const shell = isWindows ? "powershell.exe" : "bash";
+          const shellArgs = isWindows ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command] : ["-c", command];
+          const cwd = (params.cwd as string) || activeWs || process.cwd();
+
+          return new Promise<JsonRpcResponse>((resolve) => {
+            let stdoutAccum = "";
+            let stderrAccum = "";
+            let responded = false;
+
+            try {
+              const child = child_process.spawn(shell, shellArgs, {
+                cwd,
+                windowsHide: true,
+                env: process.env,
+              });
+
+              child.stdout?.on("data", (chunk: Buffer) => {
+                const text = chunk.toString("utf-8");
+                stdoutAccum += text;
+                this.broadcastNotification("terminal.output", {
+                  executionId: execId,
+                  chunk: text,
+                  stream: "stdout",
+                });
+              });
+
+              child.stderr?.on("data", (chunk: Buffer) => {
+                const text = chunk.toString("utf-8");
+                stderrAccum += text;
+                this.broadcastNotification("terminal.output", {
+                  executionId: execId,
+                  chunk: text,
+                  stream: "stderr",
+                });
+              });
+
+              child.on("close", (exitCode: number | null) => {
+                if (!responded) {
+                  responded = true;
+                  resolve({
+                    jsonrpc: "2.0",
+                    id,
+                    result: {
+                      executionId: execId,
+                      allowed: true,
+                      riskLevel: safety.riskLevel,
+                      exitCode: exitCode ?? 0,
+                      stdout: stdoutAccum,
+                      stderr: stderrAccum,
+                      output: (stdoutAccum + (stderrAccum ? "\n" + stderrAccum : "")).trim(),
+                    },
+                  });
+                }
+              });
+
+              child.on("error", (err) => {
+                if (!responded) {
+                  responded = true;
+                  resolve({
+                    jsonrpc: "2.0",
+                    id,
+                    result: {
+                      executionId: execId,
+                      allowed: true,
+                      riskLevel: safety.riskLevel,
+                      exitCode: 1,
+                      stdout: stdoutAccum,
+                      stderr: err.message,
+                      output: err.message,
+                    },
+                  });
+                }
+              });
+
+              // Also resolve after a brief delay if long-running
+              setTimeout(() => {
+                if (!responded) {
+                  responded = true;
+                  resolve({
+                    jsonrpc: "2.0",
+                    id,
+                    result: {
+                      executionId: execId,
+                      allowed: true,
+                      riskLevel: safety.riskLevel,
+                      status: "running",
+                      stdout: stdoutAccum,
+                      output: stdoutAccum,
+                    },
+                  });
+                }
+              }, 1200);
+            } catch (err: unknown) {
+              const msg = err instanceof Error ? err.message : String(err);
+              resolve({
+                jsonrpc: "2.0",
+                id,
+                error: { code: -32005, message: `Execution failed: ${msg}` },
+              });
+            }
+          });
+        }
+
+        case "macro.run": {
+          const macroId = params.macroId as string;
+          if (!macroId) {
+            return {
+              jsonrpc: "2.0",
+              id,
+              error: { code: -32602, message: "Missing required parameter: macroId" },
+            };
+          }
+
+          let presetCommand = "";
+          switch (macroId) {
+            case "typecheck":
+              presetCommand = "npm run typecheck";
+              break;
+            case "adb-devices":
+              presetCommand = "adb devices";
+              break;
+            case "git-status":
+              presetCommand = "git status";
+              break;
+            case "gpu-stats":
+              presetCommand = "nvidia-smi";
+              break;
+            case "media-play-pause":
+              presetCommand = process.platform === "win32"
+                ? `powershell -c "$wscript = New-Object -ComObject WScript.Shell; $wscript.SendKeys([char]179)"`
+                : "playerctl play-pause";
+              break;
+            case "volume-mute":
+              presetCommand = process.platform === "win32"
+                ? `powershell -c "$wscript = New-Object -ComObject WScript.Shell; $wscript.SendKeys([char]173)"`
+                : "pactl set-sink-mute @DEFAULT_SINK@ toggle";
+              break;
+            default:
+              return {
+                jsonrpc: "2.0",
+                id,
+                error: { code: -32602, message: `Unknown macro preset: ${macroId}` },
+              };
+          }
+
+          return this.dispatchJsonRpc({
+            jsonrpc: "2.0",
+            id,
+            method: "terminal.exec",
+            params: { command: presetCommand },
+          });
+        }
+
         case "terminal.execute": {
           const command = params.command as string;
           const approvalId = params.approvalId as string | undefined;
@@ -1119,6 +1369,36 @@ export class GravKtrlServer {
         }
 
         // ANTIGRAVITY NATIVE REMOTE CONTROL ("Work with local agents from another device")
+        case "antigravity.getRemoteConfig": {
+          const rcStatus = await this.antigravityHub.getRemoteControlInfo().catch(() => null);
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              remoteUrl: this.antigravityRemoteUrl || rcStatus?.url || "",
+              enabled: rcStatus?.enabled ?? Boolean(this.antigravityRemoteUrl),
+              instanceId: rcStatus?.instanceId || "",
+              companionOrigin: rcStatus?.companionOrigin || "",
+              accountChooserUrl: rcStatus?.accountChooserUrl || "",
+            },
+          };
+        }
+
+        case "antigravity.setRemoteUrl": {
+          const remoteUrl = ((params.url || params.remoteUrl) as string) || "";
+          if (typeof remoteUrl === "string") {
+            this.antigravityRemoteUrl = remoteUrl.trim();
+          }
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              success: true,
+              remoteUrl: this.antigravityRemoteUrl,
+            },
+          };
+        }
+
         case "antigravity.getRemoteControl": {
           const status = await this.antigravityHub.getRemoteControlInfo();
           return { jsonrpc: "2.0", id, result: status };
@@ -1169,9 +1449,22 @@ export class GravKtrlServer {
     }
   }
 
+  public getAuthPairing(): GravKtrlAuthPairing {
+    return this.authPairing;
+  }
+
+  public getPort(): number {
+    return this.port;
+  }
+
   public start(): Promise<void> {
     return new Promise((resolve) => {
       this.httpServer.listen(this.port, "0.0.0.0", () => {
+        const addr = this.httpServer.address();
+        if (addr && typeof addr === "object") {
+          this.port = addr.port;
+        }
+        this.discoveryBroadcaster.start(() => this.authPairing.getFormattedPin());
         this.auth.printStartupBanner(this.port);
         resolve();
       });
@@ -1179,6 +1472,7 @@ export class GravKtrlServer {
   }
 
   public stop(): Promise<void> {
+    this.discoveryBroadcaster.stop();
     this.workspaceWatcher.stop();
     this.conversationManager.dispose();
     this.modelManager.dispose();

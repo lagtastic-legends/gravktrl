@@ -32,15 +32,18 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
   <title>GravKtrl Desktop Control Center</title>
   <style>
     :root {
-      --bg: #030712;
-      --card-bg: #0b1120;
-      --border: #1e293b;
-      --accent-purple: #9333ea;
-      --accent-cyan: #06b6d4;
-      --accent-emerald: #10b981;
-      --accent-amber: #f59e0b;
-      --text: #f3f4f6;
-      --text-muted: #9ca3af;
+      --bg: #090D0C;
+      --card-bg: #141C1A;
+      --border: #202E2A;
+      --accent-forest: #102C26;
+      --accent-champagne: #F7E7CE;
+      --accent-donkey: #A79277;
+      --accent-purple: #102C26;
+      --accent-cyan: #F7E7CE;
+      --accent-emerald: #245E52;
+      --accent-amber: #A79277;
+      --text: #F7E7CE;
+      --text-muted: #A79277;
     }
     * {
       box-sizing: border-box;
@@ -59,7 +62,7 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
       padding-bottom: 24px;
     }
     header {
-      background: rgba(11, 17, 32, 0.85);
+      background: rgba(20, 28, 26, 0.9);
       backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border);
       padding: 14px 18px;
@@ -83,7 +86,7 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
       font-size: 16px;
       font-weight: 800;
       letter-spacing: -0.02em;
-      background: linear-gradient(135deg, #a855f7, #06b6d4);
+      background: linear-gradient(135deg, #F7E7CE, #A79277);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }

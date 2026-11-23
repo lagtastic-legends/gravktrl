@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="100%" height="100%" fill="none">
+  <defs>
+    <!-- Background Gradient -->
+    <radialGradient id="bgGrad" cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+      <stop offset="0%" stop-color="#141C1A"/>
+      <stop offset="100%" stop-color="#090D0C"/>
+    </radialGradient>
+
+    <!-- Orbital Ring Gradients -->
+    <linearGradient id="orbitalArc1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F7E7CE" stop-opacity="0.95"/>
+      <stop offset="50%" stop-color="#A79277" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#102C26" stop-opacity="0.1"/>
+    </linearGradient>
+
+    <linearGradient id="orbitalArc2" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#A79277" stop-opacity="0.85"/>
+      <stop offset="60%" stop-color="#102C26" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#F7E7CE" stop-opacity="0.15"/>
+    </linearGradient>
+
+    <!-- Isometric Hex Core Facet Gradients -->
+    <linearGradient id="hexTop" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#245E52"/>
+      <stop offset="100%" stop-color="#163F36"/>
+    </linearGradient>
+
+    <linearGradient id="hexLeft" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#102C26"/>
+      <stop offset="100%" stop-color="#0A1C18"/>
+    </linearGradient>
+
+    <linearGradient id="hexRight" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0E2721"/>
+      <stop offset="100%" stop-color="#071411"/>
+    </linearGradient>
+
+    <!-- Chevron & Terminal Glow -->
+    <filter id="champagneGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Base Rounded Container -->
+  <rect width="256" height="256" rx="56" fill="url(#bgGrad)"/>
+  <rect width="254" height="254" x="1" y="1" rx="55" stroke="#202E2A" stroke-width="1.5"/>
+
+  <!-- Telemetry Orbital Arc 1 (Outer Ellipse) -->
+  <ellipse cx="128" cy="128" rx="98" ry="52" stroke="url(#orbitalArc1)" stroke-width="2" stroke-dasharray="14 6 4 6" transform="rotate(-25 128 128)"/>
+
+  <!-- Telemetry Orbital Arc 2 (Counter-Tilted Ellipse) -->
+  <ellipse cx="128" cy="128" rx="92" ry="46" stroke="url(#orbitalArc2)" stroke-width="1.8" stroke-dasharray="24 8 2 8" transform="rotate(35 128 128)"/>
+
+  <!-- Orbit Nodes / Beacons -->
+  <circle cx="218" cy="86" r="3.5" fill="#F7E7CE" filter="url(#champagneGlow)"/>
+  <circle cx="38" cy="170" r="2.5" fill="#A79277"/>
+
+  <!-- Isometric Gravity-Well Hex Core (R=54) -->
+  <!-- Center: 128, 128 -->
+  <!-- Top Face -->
+  <polygon points="128,74 174,101 128,128 82,101" fill="url(#hexTop)" stroke="#A79277" stroke-width="1.2" stroke-opacity="0.4"/>
+
+  <!-- Left Bottom Face -->
+  <polygon points="82,101 128,128 128,182 82,155" fill="url(#hexLeft)" stroke="#102C26" stroke-width="1.2"/>
+
+  <!-- Right Bottom Face -->
+  <polygon points="128,128 174,101 174,155 128,182" fill="url(#hexRight)" stroke="#102C26" stroke-width="1.2"/>
+
+  <!-- Internal Well Recess (Inner Hex) -->
+  <polygon points="128,94 154,109 128,124 102,109" fill="#0A1A16" stroke="#245E52" stroke-width="1"/>
+
+  <!-- Command Chevron (>_) centered on core -->
+  <!-- Chevron '>' -->
+  <path d="M116 114 L128 124 L116 134" stroke="#F7E7CE" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#champagneGlow)"/>
+  <!-- Underscore '_' -->
+  <path d="M134 134 L146 134" stroke="#A79277" stroke-width="3.5" stroke-linecap="round" filter="url(#champagneGlow)"/>
+</svg>
