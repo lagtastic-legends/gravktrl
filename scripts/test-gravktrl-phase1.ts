@@ -1,12 +1,15 @@
-setTimeout(() => { console.error("TIMEOUT"); process.exit(1); }, 15000).unref();
+setTimeout(() => { console.error("TIMEOUT"); process.exit(1); }, 20000).unref();
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { GravKtrlServer } from "../pc-daemon/src/server.js";
 import { validateCommandSafety } from "../pc-daemon/src/command-guard.js";
 import { WebSocket } from "ws";
 
 async function runPhase1Verification() {
   console.log("=================================================");
-  console.log("  GRAVKTRL PHASE 1 AUTOMATED VERIFICATION SUITE  ");
+  console.log("  GRAVKTRL PHASE 1–4 AUTOMATED VERIFICATION      ");
   console.log("=================================================");
 
   // 1. Assert Command Guard validation
@@ -29,9 +32,16 @@ async function runPhase1Verification() {
   }
   console.log("  ✓ 'git status' successfully allowed (risk: safe)");
 
-  // 2. Start PC Daemon on ephemeral port 0
+  const safe2 = validateCommandSafety("npm run build:mobile");
+  if (!safe2.allowed) {
+    throw new Error(`Failed: 'npm run build:mobile' was incorrectly blocked! Result: ${JSON.stringify(safe2)}`);
+  }
+  console.log("  ✓ 'npm run build:mobile' successfully allowed (risk: safe)");
+
+  // 2. Start PC Daemon on ephemeral port 0 with isolated temp state dir
   console.log("\n[TEST 2] Booting GravKtrl Daemon on ephemeral port 0...");
-  const server = new GravKtrlServer(0);
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gravktrl-p1-"));
+  const server = new GravKtrlServer(0, tmpDir);
   await server.start();
   const port = server.getPort();
   console.log(`  ✓ Daemon active on ephemeral port: ${port}`);
@@ -50,8 +60,18 @@ async function runPhase1Verification() {
     }
     console.log(`  ✓ Discovery beacon verified (service: ${discData.service}, host: ${discData.hostname}, IP: ${discData.lanIp})`);
 
-    // 4. Test POST /api/pair with invalid PIN (must reject with 401)
-    console.log("\n[TEST 4] Testing POST /api/pair with invalid PIN (expecting 401)...");
+    // 4. Test Tier 4 Built-in Dashboard on GET /
+    console.log("\n[TEST 4] Testing Tier 4 Dark-Mode Web Dashboard (GET /)...");
+    const dashRes = await fetch(`http://127.0.0.1:${port}/`);
+    if (!dashRes.ok) throw new Error(`GET / returned status ${dashRes.status}`);
+    const dashHtml = await dashRes.text();
+    if (!dashHtml.includes("#090D0C") || !dashHtml.includes("#F7E7CE")) {
+      throw new Error("Dashboard HTML missing Dark-Mode-First palette tokens");
+    }
+    console.log("  ✓ Tier 4 pairing dashboard verified on GET /");
+
+    // 5. Test POST /api/pair with invalid PIN (must reject with 401)
+    console.log("\n[TEST 5] Testing POST /api/pair with invalid PIN (expecting 401)...");
     const badPairRes = await fetch(`http://127.0.0.1:${port}/api/pair`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -66,8 +86,8 @@ async function runPhase1Verification() {
     }
     console.log("  ✓ Invalid PIN correctly rejected with status 401");
 
-    // 5. Test POST /api/pair with valid PIN
-    console.log("\n[TEST 5] Testing POST /api/pair with valid PIN...");
+    // 6. Test POST /api/pair with valid PIN
+    console.log("\n[TEST 6] Testing POST /api/pair with valid PIN...");
     const validPin = server.getAuthPairing().getPin();
     const goodPairRes = await fetch(`http://127.0.0.1:${port}/api/pair`, {
       method: "POST",
@@ -88,8 +108,29 @@ async function runPhase1Verification() {
 
     const sessionToken = goodPairData.token;
 
-    // 6. Test WebSocket JSON-RPC 2.0 with session token
-    console.log("\n[TEST 6] Testing Authenticated WebSocket JSON-RPC 2.0...");
+    // 7. Test HTTP POST /api/rpc with exchanged session token
+    console.log("\n[TEST 7] Testing HTTP POST /api/rpc with paired session token...");
+    const httpRpcRes = await fetch(`http://127.0.0.1:${port}/api/rpc`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${sessionToken}`,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "http_ping_1",
+        method: "system.ping",
+      }),
+    });
+    if (!httpRpcRes.ok) throw new Error(`POST /api/rpc failed with status ${httpRpcRes.status}`);
+    const httpRpcJson = await httpRpcRes.json();
+    if (!httpRpcJson.result?.pong) {
+      throw new Error(`POST /api/rpc system.ping invalid: ${JSON.stringify(httpRpcJson)}`);
+    }
+    console.log("  ✓ HTTP POST /api/rpc authenticated with 256-bit session token");
+
+    // 8. Test WebSocket JSON-RPC 2.0 with session token
+    console.log("\n[TEST 8] Testing Authenticated WebSocket JSON-RPC 2.0...");
     const ws = new WebSocket(`ws://127.0.0.1:${port}?token=${sessionToken}`);
 
     await new Promise<void>((resolve, reject) => {
@@ -105,7 +146,6 @@ async function runPhase1Verification() {
     });
     console.log("  ✓ WebSocket connected and authenticated");
 
-    // Helper for JSON-RPC over WS
     function sendRpc(method: string, params: Record<string, unknown> = {}): Promise<any> {
       return new Promise((resolve, reject) => {
         const id = `rpc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -131,24 +171,21 @@ async function runPhase1Verification() {
       });
     }
 
-    // 7. Test system.ping
-    console.log("\n[TEST 7] Testing JSON-RPC system.ping...");
+    // 9. Test system.ping & system.metrics
     const pingRes = await sendRpc("system.ping");
     if (!pingRes.pong || !pingRes.timestamp) {
       throw new Error(`Invalid ping response: ${JSON.stringify(pingRes)}`);
     }
     console.log(`  ✓ system.ping responded (pong: ${pingRes.pong}, timestamp: ${pingRes.timestamp})`);
 
-    // 8. Test system.metrics
-    console.log("\n[TEST 8] Testing JSON-RPC system.metrics...");
     const metricsRes = await sendRpc("system.metrics");
     if (!metricsRes.cpuCount || !metricsRes.platform || metricsRes.totalMemory === undefined) {
       throw new Error(`Invalid metrics response: ${JSON.stringify(metricsRes)}`);
     }
-    console.log(`  ✓ system.metrics verified (CPU cores: ${metricsRes.cpuCount}, platform: ${metricsRes.platform}, RAM: ${Math.round(metricsRes.totalMemory / 1024 / 1024 / 1024)}GB)`);
+    console.log(`  ✓ system.metrics verified (${metricsRes.cpuCount} cores, ${metricsRes.platform}, ${Math.round(metricsRes.totalMemory / 1024 / 1024 / 1024)}GB RAM)`);
 
-    // 9. Test antigravity.setRemoteUrl and antigravity.getRemoteConfig
-    console.log("\n[TEST 9] Testing Antigravity Remote Control Bridge...");
+    // 10. Test antigravity.setRemoteUrl and antigravity.getRemoteConfig
+    console.log("\n[TEST 9] Testing Antigravity Remote Control Bridge persistence...");
     const testUrl = "https://antigravity.google.com/remote?instance=inst_test_12345";
     const setRemoteRes = await sendRpc("antigravity.setRemoteUrl", { url: testUrl });
     if (!setRemoteRes.success || setRemoteRes.remoteUrl !== testUrl) {
@@ -158,35 +195,39 @@ async function runPhase1Verification() {
     if (getRemoteRes.remoteUrl !== testUrl) {
       throw new Error(`antigravity.getRemoteConfig mismatch: ${JSON.stringify(getRemoteRes)}`);
     }
-    console.log("  ✓ Antigravity Remote Control URL stored and retrieved successfully");
+    console.log("  ✓ Antigravity Remote Control URL stored and retrieved cleanly");
 
-    // 10. Test terminal.exec (echo gravktrl-ok)
-    console.log("\n[TEST 10] Testing JSON-RPC terminal.exec ('echo gravktrl-ok')...");
+    // 11. Test terminal.exec ('echo gravktrl-ok') & macro.run ('git-status')
+    console.log("\n[TEST 10] Testing terminal.exec & macro.run...");
     const termRes = await sendRpc("terminal.exec", { command: "echo gravktrl-ok" });
-    if (!termRes.allowed || termRes.exitCode !== 0) {
+    if (!termRes.allowed || termRes.exitCode !== 0 || !termRes.output.includes("gravktrl-ok")) {
       throw new Error(`terminal.exec failed: ${JSON.stringify(termRes)}`);
     }
-    if (!termRes.output.includes("gravktrl-ok")) {
-      throw new Error(`terminal.exec output missing 'gravktrl-ok': ${termRes.output}`);
-    }
-    console.log(`  ✓ terminal.exec executed safely with output: '${termRes.output.trim()}'`);
+    console.log(`  ✓ terminal.exec executed safely ('${termRes.output.trim()}')`);
 
-    // Close WebSocket
+    const macroRes = await sendRpc("macro.run", { macroId: "git-status" });
+    if (!macroRes.allowed) {
+      throw new Error(`macro.run ('git-status') was blocked: ${JSON.stringify(macroRes)}`);
+    }
+    console.log("  ✓ macro.run ('git-status') executed safely");
+
     ws.close();
   } finally {
-    // 11. Clean shutdown of server
     console.log("\n[CLEANUP] Stopping daemon...");
     await server.stop();
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {}
     console.log("  ✓ Daemon stopped cleanly");
   }
 
   console.log("\n=================================================");
-  console.log("  ALL GRAVKTRL PHASE 1 CHECKS PASSED (100% OK)   ");
+  console.log("  ALL GRAVKTRL CHECKS PASSED (100% VERIFIED)     ");
   console.log("=================================================\n");
   process.exit(0);
 }
 
 runPhase1Verification().catch((err) => {
-  console.error("\n❌ PHASE 1 VERIFICATION FAILED:", err);
+  console.error("\n❌ VERIFICATION FAILED:", err);
   process.exit(1);
 });

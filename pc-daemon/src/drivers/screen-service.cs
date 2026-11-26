@@ -55,6 +55,15 @@ namespace GravKtrlScreenService {
         static extern bool SetCursorPos(int X, int Y);
 
         [DllImport("user32.dll")]
+        static extern bool GetCursorPos(out POINT lpPoint);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct POINT {
+            public int X;
+            public int Y;
+        }
+
+        [DllImport("user32.dll")]
         static extern void mouse_event(uint dwFlags, int dx, int dy, int dwData, UIntPtr dwExtraInfo);
 
         [DllImport("user32.dll")]
@@ -280,6 +289,17 @@ namespace GravKtrlScreenService {
             }
         }
 
+        static void SendMove(int dx, int dy) {
+            POINT pt;
+            if (GetCursorPos(out pt)) {
+                int screenW = GetSystemMetrics(SM_CXSCREEN);
+                int screenH = GetSystemMetrics(SM_CYSCREEN);
+                int nextX = Math.Max(0, Math.Min(screenW - 1, pt.X + dx));
+                int nextY = Math.Max(0, Math.Min(screenH - 1, pt.Y + dy));
+                SetCursorPos(nextX, nextY);
+            }
+        }
+
         static void SendScroll(float normX, float normY, int deltaY) {
             int screenW = GetSystemMetrics(SM_CXSCREEN);
             int screenH = GetSystemMetrics(SM_CYSCREEN);
@@ -405,6 +425,15 @@ namespace GravKtrlScreenService {
                     float ny = float.Parse(parts[2], System.Globalization.CultureInfo.InvariantCulture);
                     string btn = parts.Length > 3 ? parts[3] : "left";
                     SendClick(nx, ny, btn);
+                    WriteText(stdout, "OK");
+                    continue;
+                }
+
+                if (line.StartsWith("MOVE")) {
+                    string[] parts = line.Split(' ');
+                    int dx = parts.Length > 1 ? int.Parse(parts[1]) : 0;
+                    int dy = parts.Length > 2 ? int.Parse(parts[2]) : 0;
+                    SendMove(dx, dy);
                     WriteText(stdout, "OK");
                     continue;
                 }

@@ -47,6 +47,20 @@
     overscroll-behavior: none;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    color-scheme: dark;
+  }
+
+  input,
+  textarea,
+  select {
+    background-color: #090D0C;
+    color: #F7E7CE;
+    color-scheme: dark;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: rgba(167, 146, 119, 0.65);
   }
 }
 

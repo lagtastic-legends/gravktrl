@@ -20,9 +20,11 @@ export interface ScreenInfo {
 }
 
 export interface ScreenInputEvent {
-  type: "click" | "right_click" | "double_click" | "scroll" | "text" | "focus";
+  type: "click" | "right_click" | "double_click" | "scroll" | "text" | "focus" | "move";
   normX?: number;
   normY?: number;
+  dx?: number;
+  dy?: number;
   deltaY?: number;
   text?: string;
   button?: "left" | "right" | "double";
@@ -297,6 +299,19 @@ Add-Type -TypeDefinition $code -ReferencedAssemblies "System.Drawing"
     if (event.type === "text" && event.text) {
       const b64 = Buffer.from(event.text, "utf-8").toString("base64");
       return await this.sendCommand<{ success: boolean; message?: string }>(`TEXT ${b64}`, "cmd", 2000);
+    }
+
+    if (event.type === "move") {
+      const dx = Math.round(event.dx ?? 0);
+      const dy = Math.round(event.dy ?? 0);
+      if (process.platform !== "win32") {
+        return { success: true, message: `Move simulated (${dx}, ${dy})` };
+      }
+      return await this.sendCommand<{ success: boolean; message?: string }>(
+        `MOVE ${dx} ${dy}`,
+        "cmd",
+        1000
+      );
     }
 
     if (event.type === "focus") {

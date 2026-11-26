@@ -34,45 +34,39 @@ export const GravKtrlLogo: React.FC<GravKtrlLogoProps> = ({
           height="100%"
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
-          className="drop-shadow-[0_4px_16px_rgba(16,44,38,0.45)]"
         >
           <defs>
             <radialGradient id="gkBgGrad" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stop-color="#141C1A" />
-              <stop offset="100%" stop-color="#090D0C" />
+              <stop offset="0%" stopColor="#141C1A" />
+              <stop offset="100%" stopColor="#090D0C" />
             </radialGradient>
 
             <linearGradient id="gkOrb1" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#F7E7CE" stop-opacity="0.95" />
-              <stop offset="50%" stop-color="#A79277" stop-opacity="0.6" />
-              <stop offset="100%" stop-color="#102C26" stop-opacity="0.1" />
+              <stop offset="0%" stopColor="#F7E7CE" stopOpacity="0.95" />
+              <stop offset="50%" stopColor="#A79277" stopOpacity="0.6" />
+              <stop offset="100%" stopColor="#102C26" stopOpacity="0.1" />
             </linearGradient>
 
             <linearGradient id="gkOrb2" x1="100%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stop-color="#A79277" stop-opacity="0.85" />
-              <stop offset="60%" stop-color="#102C26" stop-opacity="0.4" />
-              <stop offset="100%" stop-color="#F7E7CE" stop-opacity="0.15" />
+              <stop offset="0%" stopColor="#A79277" stopOpacity="0.85" />
+              <stop offset="60%" stopColor="#102C26" stopOpacity="0.4" />
+              <stop offset="100%" stopColor="#F7E7CE" stopOpacity="0.15" />
             </linearGradient>
 
             <linearGradient id="gkHexTop" x1="50%" y1="0%" x2="50%" y2="100%">
-              <stop offset="0%" stop-color="#245E52" />
-              <stop offset="100%" stop-color="#163F36" />
+              <stop offset="0%" stopColor="#245E52" />
+              <stop offset="100%" stopColor="#163F36" />
             </linearGradient>
 
             <linearGradient id="gkHexLeft" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#102C26" />
-              <stop offset="100%" stop-color="#0A1C18" />
+              <stop offset="0%" stopColor="#102C26" />
+              <stop offset="100%" stopColor="#0A1C18" />
             </linearGradient>
 
             <linearGradient id="gkHexRight" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#0E2721" />
-              <stop offset="100%" stop-color="#071411" />
+              <stop offset="0%" stopColor="#0E2721" />
+              <stop offset="100%" stopColor="#071411" />
             </linearGradient>
-
-            <filter id="gkGlow" x="-20%" y="-20%" width="140%" height="140%">
-              <feGaussianBlur stdDeviation="3" result="blur" />
-              <feComposite in="SourceGraphic" in2="blur" operator="over" />
-            </filter>
           </defs>
 
           {/* Squircle Housing */}
@@ -105,7 +99,7 @@ export const GravKtrlLogo: React.FC<GravKtrlLogoProps> = ({
           />
 
           {/* Orbital Beacon Nodes */}
-          <circle cx="218" cy="86" r="3.5" fill="#F7E7CE" filter="url(#gkGlow)" />
+          <circle cx="218" cy="86" r="3.5" fill="#F7E7CE" />
           <circle cx="38" cy="170" r="2.5" fill="#A79277" />
 
           {/* Isometric Gravity-Well Hex Core */}
@@ -149,14 +143,12 @@ export const GravKtrlLogo: React.FC<GravKtrlLogoProps> = ({
             strokeWidth="3.5"
             strokeLinecap="round"
             strokeLinejoin="round"
-            filter="url(#gkGlow)"
           />
           <path
             d="M134 134 L146 134"
             stroke="#A79277"
             strokeWidth="3.5"
             strokeLinecap="round"
-            filter="url(#gkGlow)"
           />
         </svg>
       </div>

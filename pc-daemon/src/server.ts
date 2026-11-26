@@ -91,6 +91,7 @@ export class GravKtrlServer {
   private authPairing: GravKtrlAuthPairing;
   private discoveryBroadcaster: GravKtrlDiscoveryBroadcaster;
   private antigravityRemoteUrl: string = "";
+  private remoteConfigPath: string = "";
   private authenticatedSockets: Set<WebSocket> = new Set();
 
   private agentDriver?: AgentDriver;
@@ -101,6 +102,9 @@ export class GravKtrlServer {
     this.port = port;
     this.auth = new GravKtrlAuth(baseDir);
     this.authPairing = new GravKtrlAuthPairing(baseDir);
+    this.authPairing.setPin(this.auth.getPin());
+    this.remoteConfigPath = path.join(baseDir, ".gravktrl-remote.json");
+    this.antigravityRemoteUrl = this.loadPersistedRemoteUrl();
     this.discoveryBroadcaster = new GravKtrlDiscoveryBroadcaster(this.port, 8788, "0.1.0");
     this.telemetry = new TelemetryCollector();
     this.workspaceManager = new WorkspaceManager(baseDir);
@@ -466,7 +470,7 @@ export class GravKtrlServer {
     }
 
     // Direct APK Download endpoint for 1-tap mobile installation
-    if (req.method === "GET" && pathname === "/download-apk") {
+    if ((req.method === "GET" || req.method === "HEAD") && pathname === "/download-apk") {
       const apkPath = path.resolve(process.cwd(), "android/app/build/outputs/apk/debug/app-debug.apk");
       if (fs.existsSync(apkPath)) {
         const stat = fs.statSync(apkPath);
@@ -475,6 +479,10 @@ export class GravKtrlServer {
           "Content-Length": stat.size,
           "Content-Disposition": 'attachment; filename="GravKtrl.apk"',
         });
+        if (req.method === "HEAD") {
+          res.end();
+          return;
+        }
         fs.createReadStream(apkPath).pipe(res);
         return;
       } else {
@@ -484,7 +492,7 @@ export class GravKtrlServer {
       }
     }
 
-    // Windows Desktop Control Center: GET / or GET /desktop
+    // Windows Desktop Control Center (Tier 4 Web Pairing Dashboard): GET / or GET /desktop
     if (req.method === "GET" && (pathname === "/" || pathname === "/desktop" || pathname === "/desktop/")) {
       const beacon = this.auth.getDiscoveryBeacon(this.port);
       const pin = this.authPairing.getPin();
@@ -501,7 +509,7 @@ export class GravKtrlServer {
           type: "svg",
           margin: 1,
           color: {
-            dark: "#38bdf8",
+            dark: "#F7E7CE",
             light: "#00000000",
           },
         });
@@ -517,7 +525,9 @@ export class GravKtrlServer {
         activeWorkspace: activeWs,
         workspaces,
         cdpActive: cdpHealth.healthy,
-        version: "1.6.4",
+        version: "0.1.0",
+        connectedClients: this.authenticatedSockets.size,
+        antigravityRemoteUrl: this.antigravityRemoteUrl,
         remoteControl: rcStatus,
         qrCodeSvg,
       });
@@ -585,7 +595,7 @@ export class GravKtrlServer {
         (req.headers["x-gravktrl-token"] as string) ||
         (req.headers.authorization ? req.headers.authorization.replace(/^Bearer\s+/i, "") : "");
 
-      if (!this.auth.verifyToken(token)) {
+      if (!this.isTokenAuthorized(token)) {
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Unauthorized: Invalid Pairing Token" }));
         return;
@@ -607,7 +617,7 @@ export class GravKtrlServer {
         (req.headers["x-gravktrl-token"] as string) ||
         (req.headers.authorization ? req.headers.authorization.replace(/^Bearer\s+/i, "") : "");
 
-      if (!this.auth.verifyToken(token)) {
+      if (!this.isTokenAuthorized(token)) {
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Unauthorized: Invalid Pairing Token" }));
         return;
@@ -633,10 +643,11 @@ export class GravKtrlServer {
     }
 
     // Serve Static Mobile Web Commander HUD (out/ directory)
-    if (req.method === "GET" && !pathname.startsWith("/rpc")) {
+    if (req.method === "GET" && !pathname.startsWith("/rpc") && !pathname.startsWith("/api/rpc")) {
       const outDir = path.resolve(process.cwd(), "out");
       let reqPath = pathname || "/";
-      if (reqPath === "/") reqPath = "/index.html";
+      if (reqPath === "/hud" || reqPath === "/hud/") reqPath = "/index.html";
+      else if (reqPath.startsWith("/hud/")) reqPath = reqPath.slice(4);
 
       let safePath = path.join(outDir, path.normalize(reqPath).replace(/^(\.\.[/\\])+/, ""));
       if (!fs.existsSync(safePath) || fs.statSync(safePath).isDirectory()) {
@@ -668,13 +679,13 @@ export class GravKtrlServer {
       (req.headers["x-gravktrl-token"] as string) ||
       (req.headers.authorization ? req.headers.authorization.replace(/^Bearer\s+/i, "") : "");
 
-    if (!this.auth.verifyToken(token)) {
+    if (!this.isTokenAuthorized(token)) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Unauthorized: Invalid or missing pairing token" }));
       return;
     }
 
-    if (req.method === "POST" && pathname === "/rpc") {
+    if (req.method === "POST" && (pathname === "/rpc" || pathname === "/api/rpc")) {
       let body = "";
       req.on("data", (chunk) => (body += chunk));
       req.on("end", async () => {
@@ -1079,6 +1090,9 @@ export class GravKtrlServer {
             case "typecheck":
               presetCommand = "npm run typecheck";
               break;
+            case "build-mobile":
+              presetCommand = "npm run build:mobile";
+              break;
             case "adb-devices":
               presetCommand = "adb devices";
               break;
@@ -1394,6 +1408,7 @@ export class GravKtrlServer {
           const remoteUrl = ((params.url || params.remoteUrl) as string) || "";
           if (typeof remoteUrl === "string") {
             this.antigravityRemoteUrl = remoteUrl.trim();
+            this.savePersistedRemoteUrl(this.antigravityRemoteUrl);
           }
           return {
             jsonrpc: "2.0",
@@ -1455,6 +1470,33 @@ export class GravKtrlServer {
     }
   }
 
+  private isTokenAuthorized(token?: string | null): boolean {
+    return this.auth.verifyToken(token) || this.authPairing.validateToken(token);
+  }
+
+  private loadPersistedRemoteUrl(): string {
+    try {
+      if (this.remoteConfigPath && fs.existsSync(this.remoteConfigPath)) {
+        const raw = fs.readFileSync(this.remoteConfigPath, "utf-8");
+        const parsed = JSON.parse(raw) as { remoteUrl?: string };
+        return typeof parsed.remoteUrl === "string" ? parsed.remoteUrl : "";
+      }
+    } catch {}
+    return "";
+  }
+
+  private savePersistedRemoteUrl(remoteUrl: string): void {
+    try {
+      if (this.remoteConfigPath) {
+        fs.writeFileSync(
+          this.remoteConfigPath,
+          JSON.stringify({ remoteUrl, updatedAt: new Date().toISOString() }, null, 2),
+          "utf-8"
+        );
+      }
+    } catch {}
+  }
+
   public getAuthPairing(): GravKtrlAuthPairing {
     return this.authPairing;
   }
@@ -1470,6 +1512,7 @@ export class GravKtrlServer {
         if (addr && typeof addr === "object") {
           this.port = addr.port;
         }
+        this.discoveryBroadcaster = new GravKtrlDiscoveryBroadcaster(this.port, 8788, "0.1.0");
         this.discoveryBroadcaster.start(() => this.authPairing.getFormattedPin());
         this.auth.printStartupBanner(this.port);
         resolve();

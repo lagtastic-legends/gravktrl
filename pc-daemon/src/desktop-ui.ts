@@ -9,6 +9,8 @@ export interface DesktopUiParams {
   workspaces: Array<{ path: string; name: string }>;
   cdpActive: boolean;
   version: string;
+  connectedClients?: number;
+  antigravityRemoteUrl?: string;
   qrCodeSvg?: string;
   remoteControl?: {
     available: boolean;
@@ -20,28 +22,35 @@ export interface DesktopUiParams {
 }
 
 export function renderDesktopHtml(params: DesktopUiParams): string {
-  const pinDisplay = params.pin.length === 6 
-    ? `${params.pin.slice(0, 3)} - ${params.pin.slice(3)}` 
+  const pinDisplay = params.pin.length === 6
+    ? `${params.pin.slice(0, 3)} - ${params.pin.slice(3)}`
     : params.pin;
+
+  const connectedClients = params.connectedClients ?? 0;
+  const activeRemoteUrl =
+    params.antigravityRemoteUrl ||
+    params.remoteControl?.url ||
+    (params.remoteControl?.instanceId
+      ? `https://antigravity.google.com/r/${encodeURIComponent(params.remoteControl.instanceId)}`
+      : "");
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GravKtrl Desktop Control Center</title>
+  <title>GravKtrl Windows — PC Daemon & Pairing Dashboard</title>
   <style>
     :root {
       --bg: #090D0C;
+      --surface: #0F1614;
       --card-bg: #141C1A;
       --border: #202E2A;
       --accent-forest: #102C26;
+      --accent-forest-light: #184239;
       --accent-champagne: #F7E7CE;
       --accent-donkey: #A79277;
-      --accent-purple: #102C26;
-      --accent-cyan: #F7E7CE;
-      --accent-emerald: #245E52;
-      --accent-amber: #A79277;
+      --accent-emerald: #34D399;
       --text: #F7E7CE;
       --text-muted: #A79277;
     }
@@ -60,10 +69,10 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
       flex-direction: column;
       overflow-x: hidden;
       padding-bottom: 24px;
+      color-scheme: dark;
     }
     header {
-      background: rgba(20, 28, 26, 0.9);
-      backdrop-filter: blur(12px);
+      background: #0F1614;
       border-bottom: 1px solid var(--border);
       padding: 14px 18px;
       display: flex;
@@ -79,49 +88,46 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
       gap: 10px;
     }
     .brand-logo {
-      width: 28px;
-      height: 28px;
+      width: 32px;
+      height: 32px;
     }
     .brand h1 {
       font-size: 16px;
       font-weight: 800;
       letter-spacing: -0.02em;
-      background: linear-gradient(135deg, #F7E7CE, #A79277);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+      color: var(--accent-champagne);
     }
     .badge-live {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 3px 8px;
+      padding: 4px 10px;
       border-radius: 9999px;
       font-size: 11px;
-      font-weight: 600;
-      background: rgba(16, 185, 129, 0.12);
+      font-weight: 700;
+      background: rgba(16, 44, 38, 0.9);
       color: var(--accent-emerald);
-      border: 1px solid rgba(16, 185, 129, 0.3);
+      border: 1px solid rgba(52, 211, 153, 0.35);
     }
     .pulse-dot {
       width: 6px;
       height: 6px;
       border-radius: 50%;
       background: var(--accent-emerald);
-      box-shadow: 0 0 8px var(--accent-emerald);
     }
     main {
       padding: 16px;
       display: flex;
       flex-direction: column;
       gap: 14px;
-      max-width: 500px;
+      max-width: 560px;
       margin: 0 auto;
       width: 100%;
     }
     .card {
       background: var(--card-bg);
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: 14px;
       padding: 14px 16px;
       position: relative;
     }
@@ -129,38 +135,41 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
       font-size: 11px;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.06em;
       color: var(--text-muted);
-      margin-bottom: 8px;
+      margin-bottom: 10px;
       display: flex;
       align-items: center;
       justify-content: space-between;
     }
     .pin-box {
-      background: #000000;
-      border: 1px solid rgba(147, 51, 234, 0.4);
+      background: #090D0C;
+      border: 1px solid rgba(167, 146, 119, 0.35);
       border-radius: 10px;
-      padding: 16px;
+      padding: 14px;
       text-align: center;
       cursor: pointer;
-      transition: all 0.2s;
+      transition: border-color 0.15s ease-out;
     }
     .pin-box:hover {
-      border-color: var(--accent-cyan);
-      box-shadow: 0 0 16px rgba(6, 182, 212, 0.2);
+      border-color: var(--accent-champagne);
     }
     .pin-code {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 32px;
+      font-size: 28px;
       font-weight: 900;
-      letter-spacing: 0.15em;
-      color: #38bdf8;
-      text-shadow: 0 0 12px rgba(56, 189, 248, 0.5);
+      letter-spacing: 0.14em;
+      color: var(--accent-champagne);
     }
     .pin-hint {
       font-size: 11px;
       color: var(--text-muted);
       margin-top: 6px;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
     }
     .grid-2 {
       display: grid;
@@ -172,7 +181,7 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
       color: var(--text-muted);
     }
     .stat-val {
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 600;
       color: var(--text);
       font-family: ui-monospace, monospace;
@@ -185,29 +194,22 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 700;
-      padding: 4px 10px;
+      padding: 3px 8px;
       border-radius: 6px;
-    }
-    .mode-cdp {
-      background: rgba(6, 182, 212, 0.15);
-      color: #38bdf8;
-      border: 1px solid rgba(6, 182, 212, 0.3);
-    }
-    .mode-win32 {
-      background: rgba(147, 51, 234, 0.15);
-      color: #c084fc;
-      border: 1px solid rgba(147, 51, 234, 0.3);
+      background: var(--accent-forest);
+      color: var(--accent-champagne);
+      border: 1px solid rgba(167, 146, 119, 0.3);
     }
     .workspace-path {
       font-family: ui-monospace, monospace;
       font-size: 12px;
-      color: #cbd5e1;
-      background: #020617;
-      border: 1px solid #1e293b;
+      color: var(--accent-champagne);
+      background: #090D0C;
+      border: 1px solid var(--border);
       padding: 8px 10px;
-      border-radius: 6px;
+      border-radius: 8px;
       word-break: break-all;
       margin-top: 4px;
     }
@@ -222,33 +224,34 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
       justify-content: center;
       gap: 8px;
       padding: 10px 14px;
-      border-radius: 8px;
+      border-radius: 10px;
       font-size: 12px;
-      font-weight: 600;
+      font-weight: 700;
       cursor: pointer;
-      border: none;
-      transition: all 0.15s ease-in-out;
+      border: 1px solid rgba(167, 146, 119, 0.3);
+      transition: transform 0.15s ease-out, opacity 0.15s ease-out;
       text-decoration: none;
     }
+    .btn:active {
+      transform: scale(0.98);
+    }
     .btn-primary {
-      background: linear-gradient(135deg, #9333ea, #db2777);
-      color: #ffffff;
-      box-shadow: 0 2px 10px rgba(147, 51, 234, 0.3);
+      background: var(--accent-champagne);
+      color: #090D0C;
+      border-color: var(--accent-champagne);
     }
     .btn-primary:hover {
-      box-shadow: 0 4px 16px rgba(147, 51, 234, 0.5);
-      transform: translateY(-1px);
+      opacity: 0.92;
     }
     .btn-secondary {
-      background: #1e293b;
-      color: #f1f5f9;
-      border: 1px solid #334155;
+      background: var(--accent-forest);
+      color: var(--accent-champagne);
     }
     .btn-secondary:hover {
-      background: #334155;
+      background: var(--accent-forest-light);
     }
     .feed {
-      max-height: 160px;
+      max-height: 150px;
       overflow-y: auto;
       display: flex;
       flex-direction: column;
@@ -259,27 +262,25 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
       font-size: 11px;
       padding: 6px 8px;
       border-radius: 6px;
-      background: #030712;
-      border-left: 3px solid var(--accent-cyan);
+      background: #090D0C;
+      border-left: 3px solid var(--accent-donkey);
       display: flex;
       align-items: center;
       justify-content: space-between;
     }
     .feed-item.created { border-left-color: var(--accent-emerald); }
-    .feed-item.deleted { border-left-color: #ef4444; }
-
-    /* Remote Control Card & Toggle */
+    .feed-item.deleted { border-left-color: #f87171; }
     .rc-toggle-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      margin-top: 8px;
+      margin-top: 4px;
     }
     .rc-toggle-label {
       font-size: 13px;
       font-weight: 600;
-      color: var(--text-main);
+      color: var(--text);
     }
     .rc-toggle-desc {
       font-size: 11px;
@@ -302,8 +303,8 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
       position: absolute;
       cursor: pointer;
       top: 0; left: 0; right: 0; bottom: 0;
-      background-color: #334155;
-      transition: .25s cubic-bezier(0.4, 0, 0.2, 1);
+      background-color: #202E2A;
+      transition: transform 0.2s ease-out;
       border-radius: 24px;
     }
     .slider:before {
@@ -313,74 +314,70 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
       width: 18px;
       left: 3px;
       bottom: 3px;
-      background-color: #ffffff;
-      transition: .25s cubic-bezier(0.4, 0, 0.2, 1);
+      background-color: #F7E7CE;
+      transition: transform 0.2s ease-out;
       border-radius: 50%;
     }
     input:checked + .slider {
-      background: linear-gradient(135deg, #10b981, #06b6d4);
+      background: #245E52;
     }
     input:checked + .slider:before {
       transform: translateX(20px);
     }
     .rc-input {
       width: 100%;
-      background: #030712;
+      background: #090D0C !important;
       border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 6px 10px;
-      color: var(--text-main);
+      border-radius: 8px;
+      padding: 8px 10px;
+      color: #F7E7CE !important;
       font-size: 12px;
-      font-family: inherit;
+      font-family: ui-monospace, monospace;
       outline: none;
-      box-sizing: border-box;
       margin-top: 4px;
     }
     .rc-input:focus {
-      border-color: var(--accent-purple);
+      border-color: var(--accent-champagne);
     }
     .rc-url-box {
       display: flex;
       align-items: center;
-      background: #030712;
+      background: #090D0C;
       border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 4px 6px 4px 10px;
+      border-radius: 8px;
+      padding: 6px 8px 6px 10px;
       gap: 8px;
       margin-top: 4px;
     }
     .rc-url-text {
       flex: 1;
       font-size: 11px;
-      font-family: monospace;
-      color: var(--accent-cyan);
+      font-family: ui-monospace, monospace;
+      color: var(--accent-champagne);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .btn-copy {
-      background: #1e293b;
-      border: 1px solid #334155;
-      color: #f8fafc;
-      border-radius: 4px;
+      background: var(--accent-forest);
+      border: 1px solid rgba(167, 146, 119, 0.35);
+      color: var(--accent-champagne);
+      border-radius: 6px;
       padding: 4px 8px;
       font-size: 10px;
-      font-weight: 600;
+      font-weight: 700;
       cursor: pointer;
-    }
-    .btn-copy:hover {
-      background: #334155;
     }
     .feed-path {
       font-family: ui-monospace, monospace;
-      color: #e2e8f0;
+      color: var(--text);
       max-width: 80%;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .feed-time {
-      color: #64748b;
+      color: var(--text-muted);
       font-size: 10px;
     }
     .toast {
@@ -388,15 +385,15 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
       bottom: 20px;
       left: 50%;
       transform: translateX(-50%);
-      background: #10b981;
-      color: #ffffff;
+      background: var(--accent-champagne);
+      color: #090D0C;
       padding: 6px 14px;
       border-radius: 20px;
       font-size: 12px;
-      font-weight: 600;
+      font-weight: 700;
       opacity: 0;
       pointer-events: none;
-      transition: opacity 0.2s;
+      transition: opacity 0.2s ease-out;
       z-index: 100;
     }
     .toast.show {
@@ -407,19 +404,15 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
 <body>
   <header>
     <div class="brand">
-      <svg class="brand-logo" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <polygon points="50,6 88,28 88,72 50,94 12,72 12,28" fill="#030712" stroke="#9333ea" stroke-width="4"/>
-        <circle cx="50" cy="50" r="32" stroke="url(#logo_grad)" stroke-width="4" stroke-dasharray="160 30" transform="rotate(-30 50 50)"/>
-        <path d="M50 24L38 42H46V70H54V42H62L50 24Z" fill="url(#logo_grad)"/>
-        <path d="M28 42L22 50L28 58" stroke="#06b6d4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M72 42L78 50L72 58" stroke="#06b6d4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-        <defs>
-          <linearGradient id="logo_grad" x1="20" y1="20" x2="80" y2="80" gradientUnits="userSpaceOnUse">
-            <stop stop-color="#9333ea"/>
-            <stop offset="0.5" stop-color="#db2777"/>
-            <stop offset="1" stop-color="#06b6d4"/>
-          </linearGradient>
-        </defs>
+      <svg class="brand-logo" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="256" height="256" rx="56" fill="#090D0C" stroke="#202E2A" stroke-width="4"/>
+        <ellipse cx="128" cy="128" rx="96" ry="50" stroke="#F7E7CE" stroke-opacity="0.85" stroke-width="5" stroke-dasharray="18 10" transform="rotate(-25 128 128)"/>
+        <ellipse cx="128" cy="128" rx="88" ry="44" stroke="#A79277" stroke-opacity="0.7" stroke-width="4" stroke-dasharray="22 10" transform="rotate(35 128 128)"/>
+        <polygon points="128,74 174,101 128,128 82,101" fill="#184239" stroke="#A79277" stroke-width="2"/>
+        <polygon points="82,101 128,128 128,182 82,155" fill="#102C26"/>
+        <polygon points="128,128 174,101 174,155 128,182" fill="#0A1B17"/>
+        <path d="M116 114 L128 124 L116 134" stroke="#F7E7CE" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M134 134 L146 134" stroke="#A79277" stroke-width="6" stroke-linecap="round"/>
       </svg>
       <div>
         <h1>GravKtrl Windows</h1>
@@ -436,59 +429,56 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
     <!-- INSTANT SMARTPHONE PAIRING & QR CODE -->
     <div class="card">
       <div class="card-title">
-        <span>Instant Smartphone Pairing</span>
-        <span style="font-size: 10px; color: var(--accent-cyan); font-weight: 500;">Zero Typing Radar</span>
+        <span>4-Tier Zero-Typing Pairing</span>
+        <span style="font-size: 10px; color: var(--accent-champagne);">Port ${params.port} &bull; UDP 8788</span>
       </div>
       <div style="display: flex; gap: 12px; align-items: center;">
         ${params.qrCodeSvg ? `
-        <div style="background: #000; border: 1px solid rgba(6, 182, 212, 0.4); border-radius: 10px; padding: 6px; width: 110px; height: 110px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;" title="Scan with GravKtrl phone camera">
-          <div style="width: 96px; height: 96px; display: flex; align-items: center; justify-content: center;">
+        <div style="background: #090D0C; border: 1px solid rgba(167, 146, 119, 0.35); border-radius: 10px; padding: 6px; width: 108px; height: 108px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;" title="Scan with GravKtrl phone camera">
+          <div style="width: 94px; height: 94px; display: flex; align-items: center; justify-content: center;">
             ${params.qrCodeSvg}
           </div>
         </div>
         ` : ""}
-        <div class="pin-box" id="pinBox" style="flex: 1; padding: 12px;" title="Click to copy pairing credentials">
-          <div class="pin-code" style="font-size: 24px;">${pinDisplay}</div>
-          <div class="pin-hint">6-Digit Quick PIN or Scan QR with Phone Camera</div>
+        <div class="pin-box" id="pinBox" style="flex: 1;" title="Click to copy pairing PIN">
+          <div class="pin-code">${pinDisplay}</div>
+          <div class="pin-hint">6-Digit Quick PIN (Click to copy)</div>
         </div>
-      </div>
-      <div style="margin-top: 8px; font-size: 10px; color: #94a3b8; line-height: 1.4;">
-        💡 <strong>Antigravity Screen Scan:</strong> You can also scan Antigravity's on-screen QR code (Settings &gt; Remote Control) to auto-pair!
       </div>
     </div>
 
-    <!-- ANTIGRAVITY CONTROLLER STATUS -->
+    <!-- NETWORK ENDPOINTS & CONNECTED CLIENTS -->
     <div class="card">
       <div class="card-title">
-        <span>Antigravity Controller</span>
-        <span id="modeBadge" class="mode-pill ${params.cdpActive ? "mode-cdp" : "mode-win32"}">
-          ${params.cdpActive ? "CDP PORT 9222 ACTIVE" : "WIN32 NATIVE PROCESS"}
-        </span>
+        <span>Network &amp; Clients</span>
+        <span class="mode-pill">${params.cdpActive ? "CDP PORT 9222 ACTIVE" : "DAEMON READY"}</span>
       </div>
-      <div class="grid-2" style="margin-top: 6px;">
+      <div class="grid-3">
         <div>
-          <div class="stat-label">Wi-Fi LAN IP</div>
+          <div class="stat-label">LAN Endpoint</div>
           <div class="stat-val">${params.lanIp}:${params.port}</div>
         </div>
         <div>
-          <div class="stat-label">Tailscale VPN</div>
+          <div class="stat-label">Tailscale Mesh</div>
           <div class="stat-val">${params.tailscaleIp ? `${params.tailscaleIp}:${params.port}` : "Not active"}</div>
+        </div>
+        <div>
+          <div class="stat-label">Connected Clients</div>
+          <div class="stat-val" id="clientCountVal">${connectedClients} Active</div>
         </div>
       </div>
     </div>
 
-    <!-- NATIVE ANTIGRAVITY REMOTE CONTROL (WORK WITH LOCAL AGENTS FROM ANOTHER DEVICE) -->
+    <!-- ANTIGRAVITY REMOTE CONTROL BRIDGE -->
     <div class="card" id="remoteControlCard">
       <div class="card-title">
-        <span>Remote Control</span>
-        <span id="rcBadge" class="mode-pill ${params.remoteControl?.enabled ? "mode-cdp" : "mode-win32"}">
-          ${params.remoteControl?.enabled ? "ACTIVE" : "DISABLED"}
-        </span>
+        <span>Antigravity Remote Control Bridge</span>
+        <span id="rcBadge" class="mode-pill">${activeRemoteUrl || params.remoteControl?.enabled ? "LINKED" : "STANDBY"}</span>
       </div>
       <div class="rc-toggle-row">
         <div>
-          <div class="rc-toggle-label">Enable Remote Control</div>
-          <div class="rc-toggle-desc">Work with local agents from another device.</div>
+          <div class="rc-toggle-label">Remote Control Bridge URL</div>
+          <div class="rc-toggle-desc">Persisted Antigravity Settings &rarr; Remote Control link.</div>
         </div>
         <label class="switch">
           <input type="checkbox" id="rcToggle" ${params.remoteControl?.enabled ? "checked" : ""} onchange="onToggleRemoteControl(this.checked)">
@@ -496,22 +486,15 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
         </label>
       </div>
 
-      <div id="rcDetails" style="${params.remoteControl?.enabled ? "" : "display: none;"} margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px;">
-        <div style="margin-bottom: 8px;">
-          <div class="stat-label">Device Name</div>
-          <input type="text" id="rcHostnameInput" class="rc-input" value="${params.remoteControl?.hostname || params.hostname}" placeholder="Enter device name..." onblur="onUpdateHostname(this.value)">
+      <div style="margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px;">
+        <div class="stat-label">Active Bridge URL</div>
+        <div style="display: flex; gap: 6px; margin-top: 4px;">
+          <input type="text" id="rcUrlInput" class="rc-input" style="margin-top: 0;" value="${activeRemoteUrl}" placeholder="https://antigravity.google.com/r/...">
+          <button class="btn-copy" onclick="saveRemoteBridgeUrl()" style="padding: 0 12px; white-space: nowrap;">Save URL</button>
         </div>
-        <div style="margin-top: 8px;">
-          <div class="stat-label">Antigravity Cloud Companion Link</div>
-          <div class="rc-url-box">
-            <span class="rc-url-text" id="rcUrlText">${params.remoteControl?.url || (params.remoteControl?.instanceId ? "https://antigravity.google.com/r/" + encodeURIComponent(params.remoteControl.instanceId) : "https://antigravity.google.com/r/")}</span>
-            <button class="btn-copy" onclick="copyRcLink()" title="Copy Companion Link">Copy</button>
-          </div>
-          <div style="display: flex; gap: 8px; margin-top: 8px;">
-            <a href="/api/antigravity/remote-control/open" target="_blank" class="btn btn-primary" style="flex: 1; padding: 6px 12px; font-size: 11px;">
-              🌐 Open Companion in Browser
-            </a>
-          </div>
+        <div class="rc-url-box" style="margin-top: 8px;">
+          <span class="rc-url-text" id="rcUrlText">${activeRemoteUrl || "Not configured yet"}</span>
+          <button class="btn-copy" onclick="copyRcLink()" title="Copy Bridge Link">Copy</button>
         </div>
       </div>
     </div>
@@ -523,33 +506,24 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
         <span style="font-size: 10px; color: var(--accent-emerald);">Live Watcher Active</span>
       </div>
       <div class="workspace-path" id="activeWsPath">${params.activeWorkspace}</div>
-    </div>
-
-    <!-- LIVE FILE ACTIVITY STREAM -->
-    <div class="card">
-      <div class="card-title">
-        <span>Live Workspace Activity</span>
-        <span id="fileCount" style="font-size: 10px; color: var(--text-muted);">Listening...</span>
-      </div>
       <div class="feed" id="fileFeed">
-        <div style="font-size: 11px; color: #64748b; text-align: center; padding: 12px;">Waiting for Antigravity file edits...</div>
+        <div style="font-size: 11px; color: var(--text-muted); text-align: center; padding: 10px;">Waiting for workspace edits...</div>
       </div>
     </div>
 
     <!-- QUICK ACTIONS -->
     <div class="btn-row">
-      <button class="btn btn-primary" id="btnLaunchCdp">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-        Launch Antigravity with CDP Port 9222
-      </button>
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-        <a class="btn btn-secondary" href="/" target="_blank">
-          Open Web Commander
+      <div class="grid-2">
+        <a class="btn btn-primary" href="/hud" target="_blank">
+          Open Mobile Shell HUD
         </a>
         <a class="btn btn-secondary" href="/download-apk">
           Download Android APK
         </a>
       </div>
+      <button class="btn btn-secondary" id="btnLaunchCdp">
+        Launch Antigravity with CDP (:9222)
+      </button>
     </div>
   </main>
 
@@ -558,7 +532,6 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
   <script>
     const MASTER_TOKEN = "${params.masterToken}";
     const PIN = "${params.pin}";
-    const PORT = ${params.port};
 
     function showToast(msg) {
       const t = document.getElementById("toast");
@@ -567,48 +540,39 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
       setTimeout(() => t.classList.remove("show"), 2000);
     }
 
-    // PIN Copy
     document.getElementById("pinBox").addEventListener("click", () => {
       navigator.clipboard.writeText(PIN).then(() => {
         showToast("PIN " + PIN + " copied!");
       });
     });
 
-    // Launch Antigravity button
     document.getElementById("btnLaunchCdp").addEventListener("click", async () => {
       try {
         const res = await fetch("/api/launch-antigravity", { method: "POST" });
         const data = await res.json();
         showToast(data.message || "Launched Antigravity!");
-      } catch (e) {
+      } catch {
         showToast("Launch requested");
       }
     });
 
-    // WebSocket live stream
     let ws;
     function connectWs() {
       const protocol = location.protocol === "https:" ? "wss:" : "ws:";
       const wsUrl = protocol + "//" + location.host + "/?token=" + encodeURIComponent(MASTER_TOKEN);
       ws = new WebSocket(wsUrl);
 
-      ws.onopen = () => {
-        console.log("[GravKtrl Desktop] Connected to live daemon feed");
-      };
-
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
           if (msg.method === "agent.fileModified") {
             appendFileEvent(msg.params);
-          } else if (msg.method === "agent.streamChunk") {
-            console.log("[Agent Stream]", msg.params);
           }
-        } catch (e) {}
+        } catch {}
       };
 
       ws.onclose = () => {
-        setTimeout(connectWs, 2000);
+        setTimeout(connectWs, 2500);
       };
     }
 
@@ -625,59 +589,63 @@ export function renderDesktopHtml(params: DesktopUiParams): string {
       const timeStr = new Date(ev.timestamp || Date.now()).toLocaleTimeString();
       item.innerHTML = \`<span class="feed-path">[\${ev.action.toUpperCase()}] \${ev.file}</span><span class="feed-time">\${timeStr}</span>\`;
       feed.insertBefore(item, feed.firstChild);
-      if (feed.children.length > 30) {
+      if (feed.children.length > 20) {
         feed.removeChild(feed.lastChild);
       }
     }
 
-    // Remote Control management
+    async function saveRemoteBridgeUrl() {
+      const val = document.getElementById("rcUrlInput")?.value?.trim() || "";
+      try {
+        const res = await fetch("/api/rpc?token=" + encodeURIComponent(MASTER_TOKEN), {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + MASTER_TOKEN },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: "save_url_" + Date.now(),
+            method: "antigravity.setRemoteUrl",
+            params: { url: val }
+          })
+        });
+        const data = await res.json();
+        if (data.result?.success) {
+          const urlText = document.getElementById("rcUrlText");
+          if (urlText) urlText.innerText = data.result.remoteUrl || "Not configured yet";
+          document.getElementById("rcBadge").innerText = data.result.remoteUrl ? "LINKED" : "STANDBY";
+          showToast("Antigravity Bridge URL saved!");
+        }
+      } catch {
+        showToast("Failed to save URL");
+      }
+    }
+
     async function onToggleRemoteControl(enabled) {
       const badge = document.getElementById("rcBadge");
-      const details = document.getElementById("rcDetails");
-      const hostname = document.getElementById("rcHostnameInput")?.value;
       badge.innerText = "UPDATING...";
       try {
         const res = await fetch("/api/antigravity/remote-control/toggle", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ enabled, hostname })
+          body: JSON.stringify({ enabled })
         });
         const data = await res.json();
-        if (data.enabled) {
-          badge.className = "mode-pill mode-cdp";
-          badge.innerText = "ACTIVE";
-          if (details) details.style.display = "block";
-          if (data.url) {
-            const urlText = document.getElementById("rcUrlText");
-            if (urlText) urlText.innerText = data.url;
-          }
-          showToast("Remote Control enabled! Local agents accessible from companion.");
-        } else {
-          badge.className = "mode-pill mode-win32";
-          badge.innerText = "DISABLED";
-          if (details) details.style.display = "none";
-          showToast("Remote Control disabled.");
+        badge.innerText = data.enabled ? "LINKED" : "STANDBY";
+        if (data.url) {
+          const input = document.getElementById("rcUrlInput");
+          if (input) input.value = data.url;
+          const urlText = document.getElementById("rcUrlText");
+          if (urlText) urlText.innerText = data.url;
         }
-      } catch (err) {
+        showToast(data.enabled ? "Remote Control enabled!" : "Remote Control disabled.");
+      } catch {
         showToast("Failed to toggle Remote Control");
       }
     }
 
-    async function onUpdateHostname(hostname) {
-      try {
-        await fetch("/api/antigravity/remote-control/toggle", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ enabled: true, hostname })
-        });
-        showToast("Device name updated!");
-      } catch {}
-    }
-
     function copyRcLink() {
       const url = document.getElementById("rcUrlText")?.innerText || "";
-      if (url) {
-        navigator.clipboard.writeText(url).then(() => showToast("Companion Link copied!"));
+      if (url && url !== "Not configured yet") {
+        navigator.clipboard.writeText(url).then(() => showToast("Bridge Link copied!"));
       }
     }
 

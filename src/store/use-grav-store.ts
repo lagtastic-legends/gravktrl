@@ -3,6 +3,7 @@
 import { create } from "zustand";
 
 export type TacticalDeckId = "macros" | "antigravity" | "terminal" | "trackpad";
+export type ConnectionMode = "auto" | "lan" | "tailscale";
 
 export interface SystemMetrics {
   hostname: string;
@@ -60,18 +61,30 @@ export interface GravStoreState {
 
   // Pairing & Connection
   host: string;
+  lanIp: string;
+  tailscaleIp: string;
+  connectionMode: ConnectionMode;
   port: number;
   token: string;
   isConnected: boolean;
   isConnecting: boolean;
+  latencyMs: number | null;
   connectionError: string | null;
   isPairingModalOpen: boolean;
   discoveredDaemons: DiscoveredPcDaemon[];
   isScanning: boolean;
   setPairingModalOpen: (open: boolean) => void;
-  setConnectionConfig: (config: { host?: string; port?: number; token?: string }) => void;
+  setConnectionConfig: (config: {
+    host?: string;
+    lanIp?: string;
+    tailscaleIp?: string;
+    connectionMode?: ConnectionMode;
+    port?: number;
+    token?: string;
+  }) => void;
   setConnected: (connected: boolean) => void;
   setConnecting: (connecting: boolean) => void;
+  setLatencyMs: (ms: number | null) => void;
   setConnectionError: (err: string | null) => void;
   setDiscoveredDaemons: (daemons: DiscoveredPcDaemon[]) => void;
   setScanning: (scanning: boolean) => void;
@@ -101,39 +114,75 @@ export interface GravStoreState {
   setMacroStatus: (macroId: string, status: "idle" | "running" | "success" | "error") => void;
 }
 
+const getStored = (key: string, fallback: string): string => {
+  if (typeof window === "undefined") return fallback;
+  try {
+    return localStorage.getItem(key) || fallback;
+  } catch {
+    return fallback;
+  }
+};
+
 export const useGravStore = create<GravStoreState>((set) => ({
   // Navigation
   activeDeck: "macros",
   setActiveDeck: (deck) => set({ activeDeck: deck }),
 
   // Pairing & Connection
-  host: typeof window !== "undefined" ? localStorage.getItem("gravktrl_host") || "127.0.0.1" : "127.0.0.1",
-  port: typeof window !== "undefined" ? parseInt(localStorage.getItem("gravktrl_port") || "8787", 10) : 8787,
-  token: typeof window !== "undefined" ? localStorage.getItem("gravktrl_token") || "" : "",
+  host: getStored("gravktrl_host", "127.0.0.1"),
+  lanIp: getStored("gravktrl_lan_ip", "127.0.0.1"),
+  tailscaleIp: getStored("gravktrl_tailscale_ip", ""),
+  connectionMode: (getStored("gravktrl_conn_mode", "auto") as ConnectionMode) || "auto",
+  port: parseInt(getStored("gravktrl_port", "8787"), 10) || 8787,
+  token: getStored("gravktrl_token", ""),
   isConnected: false,
   isConnecting: false,
+  latencyMs: null,
   connectionError: null,
   isPairingModalOpen: false,
   discoveredDaemons: [],
   isScanning: false,
 
   setPairingModalOpen: (open) => set({ isPairingModalOpen: open }),
-  setConnectionConfig: ({ host, port, token }) =>
+  setConnectionConfig: ({ host, lanIp, tailscaleIp, connectionMode, port, token }) =>
     set((state) => {
-      const nextHost = host !== undefined ? host : state.host;
+      const nextLan = lanIp !== undefined ? lanIp : state.lanIp;
+      const nextTailscale = tailscaleIp !== undefined ? tailscaleIp : state.tailscaleIp;
+      const nextMode = connectionMode !== undefined ? connectionMode : state.connectionMode;
+      const resolvedHost =
+        host !== undefined
+          ? host
+          : nextMode === "tailscale" && nextTailscale
+            ? nextTailscale
+            : nextMode === "lan" && nextLan
+              ? nextLan
+              : state.host;
       const nextPort = port !== undefined ? port : state.port;
       const nextToken = token !== undefined ? token : state.token;
 
       if (typeof window !== "undefined") {
-        if (host !== undefined) localStorage.setItem("gravktrl_host", host);
-        if (port !== undefined) localStorage.setItem("gravktrl_port", port.toString());
-        if (token !== undefined) localStorage.setItem("gravktrl_token", token);
+        try {
+          localStorage.setItem("gravktrl_host", resolvedHost);
+          if (lanIp !== undefined) localStorage.setItem("gravktrl_lan_ip", nextLan);
+          if (tailscaleIp !== undefined) localStorage.setItem("gravktrl_tailscale_ip", nextTailscale);
+          if (connectionMode !== undefined) localStorage.setItem("gravktrl_conn_mode", nextMode);
+          if (port !== undefined) localStorage.setItem("gravktrl_port", nextPort.toString());
+          if (token !== undefined) localStorage.setItem("gravktrl_token", nextToken);
+        } catch {}
       }
 
-      return { host: nextHost, port: nextPort, token: nextToken };
+      return {
+        host: resolvedHost,
+        lanIp: nextLan,
+        tailscaleIp: nextTailscale,
+        connectionMode: nextMode,
+        port: nextPort,
+        token: nextToken,
+      };
     }),
   setConnected: (connected) => set({ isConnected: connected }),
   setConnecting: (connecting) => set({ isConnecting: connecting }),
+  setLatencyMs: (ms) => set({ latencyMs: ms }),
   setConnectionError: (err) => set({ connectionError: err }),
   setDiscoveredDaemons: (daemons) => set({ discoveredDaemons: daemons }),
   setScanning: (scanning) => set({ isScanning: scanning }),
@@ -158,7 +207,7 @@ export const useGravStore = create<GravStoreState>((set) => ({
   addTerminalLog: (entry) =>
     set((state) => ({
       terminalLogs: [
-        ...state.terminalLogs.slice(-100), // Keep last 100 entries for smooth mobile performance
+        ...state.terminalLogs.slice(-100),
         {
           id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           ...entry,

@@ -11,9 +11,11 @@ export interface GravKtrlPairingRecord {
 }
 
 export interface GravKtrlAuthStorage {
+  token?: string;
   masterToken: string;
   activePin: string;
   daemonVersion: string;
+  createdAt?: string;
   pairedDevices: Record<string, GravKtrlPairingRecord>;
 }
 
@@ -43,6 +45,12 @@ export class GravKtrlAuthPairing {
 
   public getPin(): string {
     return this.activePin;
+  }
+
+  public setPin(pin: string): void {
+    if (/^\d{6}$/.test(pin)) {
+      this.activePin = pin;
+    }
   }
 
   public getFormattedPin(): string {
@@ -122,8 +130,16 @@ export class GravKtrlAuthPairing {
       if (fs.existsSync(this.authFilePath)) {
         const raw = fs.readFileSync(this.authFilePath, "utf-8");
         const parsed = JSON.parse(raw) as GravKtrlAuthStorage;
-        if (parsed.masterToken && parsed.masterToken.length >= 32) {
-          return parsed;
+        const resolvedMaster = parsed.masterToken || parsed.token || "";
+        if (resolvedMaster.length >= 32) {
+          return {
+            token: resolvedMaster,
+            masterToken: resolvedMaster,
+            activePin: parsed.activePin || crypto.randomInt(100000, 1000000).toString(),
+            daemonVersion: parsed.daemonVersion || "0.1.0",
+            createdAt: parsed.createdAt || new Date().toISOString(),
+            pairedDevices: parsed.pairedDevices || {},
+          };
         }
       }
     } catch {}
@@ -131,9 +147,11 @@ export class GravKtrlAuthPairing {
     const newMasterToken = crypto.randomBytes(32).toString("hex");
     const initialPin = crypto.randomInt(100000, 1000000).toString();
     const storage: GravKtrlAuthStorage = {
+      token: newMasterToken,
       masterToken: newMasterToken,
       activePin: initialPin,
       daemonVersion: "0.1.0",
+      createdAt: new Date().toISOString(),
       pairedDevices: {},
     };
 
@@ -147,11 +165,14 @@ export class GravKtrlAuthPairing {
   private persistStorage(data?: GravKtrlAuthStorage): void {
     try {
       const storage: GravKtrlAuthStorage = data || {
+        token: this.masterToken,
         masterToken: this.masterToken,
         activePin: this.activePin,
         daemonVersion: "0.1.0",
+        createdAt: new Date().toISOString(),
         pairedDevices: {},
       };
+      if (!storage.token) storage.token = storage.masterToken;
       fs.writeFileSync(this.authFilePath, JSON.stringify(storage, null, 2), "utf-8");
     } catch {}
   }

@@ -9,6 +9,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "daemon": "tsx pc-daemon/src/server.ts",
+    "build:mobile": "next build && npx cap sync android",
     "cap:sync": "cap sync android",
     "cap:build": "next build && cap sync android",
     "test:e2e": "tsx scripts/test-gravktrl-e2e.ts"
